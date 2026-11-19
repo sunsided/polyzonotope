@@ -119,6 +119,7 @@ Property tests on random sets plus random samples of α and β:
 - `to_zonotope` is checked *by construction*: each point is reproduced with explicit coefficients in [-1, 1].
 - Exact operations commute with evaluation.
 - With `sound`, zero-tolerance checks compare results against error-free `TwoSum`/`TwoProduct` values, on inputs where plain `f64` rounds to the wrong side.
+- A cross-check against [CORA](https://github.com/TUMcps/CORA): `tests/cora/generate.m` runs the same operations in CORA and writes `tests/cora/reference.txt`, which `tests/it/cora.rs` compares against. The interval hulls of `interval_hull`, `quadratic_map`, `exact_plus`, Girard and PCA `reduce` agree to 1e-9, and so do the support functions of both reductions. `interval_hull_split` is at least as tight as CORA's split-based `interval`. Regenerate with `CORA_PATH=/path/to/CORA octave --no-gui --quiet tests/cora/generate.m`. Under Octave this needs the shims in `tests/cora/octave`. CORA itself is GPL-3.0 and is not part of this repository.
 
 ## Sound mode
 By default, arithmetic is plain `f64`. An enclosure can then miss a point by a few ulps, so don't rely on it for formal verification. The `sound` feature fixes that with outward rounding from [`inari`](https://crates.io/crates/inari):
@@ -141,7 +142,7 @@ rustflags = ["-C", "target-cpu=haswell"]
 ```
 
 ## Roadmap
-1. Separate `polyzonotope-reach` crate: nonlinear reachability by conservative polynomialization (Althoff 2013), with a CORA cross-check.
+1. Separate `polyzonotope-reach` crate: nonlinear reachability by conservative polynomialization (Althoff 2013), with a CORA cross-check of the reachable sets.
 
 ## License
 
