@@ -210,14 +210,15 @@ proptest! {
 ///
 /// Mirrors the generator order of [`SparsePolyZonotope::to_zonotope`]: constant
 /// monomials fold into the center, even monomials `m ∈ [0, 1]` become `2m - 1`,
-/// the rest keep `m`, and the independent factors follow.
+/// the rest keep `m`, the independent factors follow, and the coefficients of
+/// all-zero generators are left out along with their generators.
 fn zonotope_coefficients(pz: &SparsePolyZonotope, s: &Sample) -> Vec<f64> {
     let (e, ids) = (pz.exponents(), pz.ids());
     let a = alpha_map(ids, s);
     let mut coeffs = Vec::new();
-    for col in e.column_iter() {
+    for (col, g) in e.column_iter().zip(pz.dependent_generators().column_iter()) {
         let m = monomial(col.iter().copied(), ids, &a);
-        if col.iter().all(|&x| x == 0) {
+        if col.iter().all(|&x| x == 0) || is_zero(g.iter()) {
             continue;
         }
 
@@ -225,8 +226,18 @@ fn zonotope_coefficients(pz: &SparsePolyZonotope, s: &Sample) -> Vec<f64> {
         coeffs.push(if even { 2.0 * m - 1.0 } else { m });
     }
 
-    coeffs.extend_from_slice(&s.beta[..pz.independent_generators().ncols()]);
+    let independent = pz.independent_generators().column_iter().zip(&s.beta);
+    coeffs.extend(
+        independent
+            .filter(|(g, _)| !is_zero(g.iter()))
+            .map(|(_, &b)| b),
+    );
     coeffs
+}
+
+/// Whether every entry of a generator column is exactly zero.
+fn is_zero<'a>(mut column: impl Iterator<Item = &'a f64>) -> bool {
+    column.all(|&x| x == 0.0)
 }
 
 /// The monomial `Π_k α_k^exponents[k]` at the factor values `alpha`.

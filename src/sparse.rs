@@ -350,7 +350,9 @@ impl SparsePolyZonotope {
     ///
     /// Independent generators are kept as they are, even zero ones, so the
     /// positions of the `β` values stay stable across [`exact_plus`](Self::exact_plus)
-    /// and [`split`](Self::split).
+    /// and [`split`](Self::split). The price is that zero independent
+    /// generators, e.g. from a singular [`linear_map`](Self::linear_map), are
+    /// never reclaimed here; [`to_zonotope`](Self::to_zonotope) leaves them out.
     #[must_use]
     pub fn compact(&self) -> Self {
         let n = self.dim();
@@ -417,6 +419,9 @@ impl SparsePolyZonotope {
 
     /// Zonotope enclosure: monomials with only even exponents range over
     /// `[0, 1]`, so they contribute `g/2 + (g/2)·β`.
+    ///
+    /// All-zero generators, dependent or independent, are left out, so
+    /// [`Zonotope::order`] counts only generators that shape the set.
     #[must_use]
     pub fn to_zonotope(&self) -> Zonotope {
         let mut c = self.c.clone();
@@ -434,6 +439,7 @@ impl SparsePolyZonotope {
         }
 
         gens.extend(self.gi.column_iter().map(nalgebra::Matrix::into_owned));
+        gens.retain(|g| g.iter().any(|&x| x != 0.0));
         let n = self.dim();
         Zonotope::new(c, from_column_list(n, &gens))
     }
