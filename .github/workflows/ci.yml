@@ -67,7 +67,7 @@ jobs:
       - run: cargo clippy --workspace --all-targets --all-features -- -D warnings
 
   style:
-    name: style (separators, README links, typos)
+    name: style (separators, README links, typos, mermaid)
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -81,6 +81,11 @@ jobs:
         run: "! grep -rnoE --include='README.md' --exclude-dir=target --exclude-dir=.git --exclude-dir=review '(\\]\\(|src=\")[^)\"]*' . | grep -vE ':(\\]\\(|src=\")(https?://|#|mailto:)'"
       - name: Typos
         uses: crate-ci/typos@276087d9a4f06398b3e04825487805e2d7375888 # v1.52.2
+      - name: Mermaid diagrams render
+        run: python3 scripts/lint-mermaid.py
+        env:
+          MMDC: npx --yes @mermaid-js/mermaid-cli@12.2.0
+          MMDC_NO_SANDBOX: "1"
 
   doc:
     name: rustdoc
@@ -88,7 +93,7 @@ jobs:
     permissions:
       contents: read
     env:
-      RUSTDOCFLAGS: -D warnings
+      RUSTDOCFLAGS: -D warnings --html-in-header ${{ github.workspace }}/docs/mermaid.html
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
