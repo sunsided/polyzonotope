@@ -442,26 +442,143 @@ impl SparsePolyZonotope {
     /// [`Zonotope::order`] counts only generators that shape the set.
     #[must_use]
     pub fn to_zonotope(&self) -> Zonotope {
-        let n = self.dim();
-        let mut c = self.c.clone();
-        let mut errs = RowErrors::new(n);
-        let mut gens = Vec::with_capacity(self.g.ncols() + self.gi.ncols());
+        let mut enclosed = self.enclose_monomials(|_| true);
+        enclosed
+            .generators
+            .extend(self.gi.column_iter().map(nalgebra::Matrix::into_owned));
+        enclosed.generators.retain(|g| g.iter().any(|&x| x != 0.0));
+        let gens = from_column_list(self.dim(), &enclosed.generators);
+
+        Zonotope::new(enclosed.center, hcat(&gens, &enclosed.errs.generators()))
+    }
+
+    /// Replaces the dependent monomials `pick` selects by their enclosure:
+    /// a constant moves into the center, `[0, 1]` monomials contribute
+    /// `g/2 + (g/2)·β`, the rest `g·β`, each with its own new `β`.
+    fn enclose_monomials(&self, pick: impl Fn(usize) -> bool) -> Enclosed {
+        let mut out = Enclosed {
+            center: self.c.clone(),
+            kept: Vec::new(),
+            generators: Vec::new(),
+            errs: RowErrors::new(self.dim()),
+        };
         for j in 0..self.g.ncols() {
+            if !pick(j) {
+                out.kept.push(j);
+                continue;
+            }
+
             let g = self.g.column(j).into_owned();
             match self.monomial_range(j) {
-                MonomialRange::Constant => round::add_into(&mut c, &g, &mut errs),
+                MonomialRange::Constant => round::add_into(&mut out.center, &g, &mut out.errs),
                 MonomialRange::UnitRange => {
-                    let half = round::scaled(&g, 0.5, &mut errs);
-                    round::add_into(&mut c, &half, &mut errs);
-                    gens.push(half);
+                    let half = round::halves(&g, &mut out.errs);
+                    round::add_into(&mut out.center, &half, &mut out.errs);
+                    out.generators.push(half);
                 }
-                MonomialRange::Symmetric => gens.push(g),
+                MonomialRange::Symmetric => out.generators.push(g),
             }
         }
 
-        gens.extend(self.gi.column_iter().map(nalgebra::Matrix::into_owned));
-        gens.retain(|g| g.iter().any(|&x| x != 0.0));
-        Zonotope::new(c, hcat(&from_column_list(n, &gens), &errs.generators()))
+        out
+    }
+
+    /// Encloses every monomial that involves one of `factors`, turning it into
+    /// an independent generator appended after the existing ones, and drops
+    /// those factors. Sound, and exact for the monomials it leaves alone.
+    fn enclose_factors(&self, factors: &[FactorId]) -> Self {
+        let rows: Vec<usize> = (0..self.id.len())
+            .filter(|&k| factors.contains(&self.id[k]))
+            .collect();
+        let enclosed = self.enclose_monomials(|j| rows.iter().any(|&k| self.e[(k, j)] != 0));
+        let keep_ids: Vec<usize> = (0..self.id.len()).filter(|k| !rows.contains(k)).collect();
+        let n = self.dim();
+        let gi = hcat(&self.gi, &from_column_list(n, &enclosed.generators));
+
+        Self {
+            c: enclosed.center,
+            g: DMatrix::from_fn(n, enclosed.kept.len(), |i, j| self.g[(i, enclosed.kept[j])]),
+            gi: hcat(&gi, &enclosed.errs.generators()),
+            e: DMatrix::from_fn(keep_ids.len(), enclosed.kept.len(), |k, j| {
+                self.e[(keep_ids[k], enclosed.kept[j])]
+            }),
+            id: keep_ids.iter().map(|&k| self.id[k]).collect(),
+        }
+    }
+
+    /// `{ (xᵀ Q₁ x, …, xᵀ Q_m x) | x ∈ PZ }`, one output dimension per matrix in `maps`.
+    ///
+    /// Exact when the set has no independent generators, as in Kochdumper &
+    /// Althoff (2021). Otherwise every monomial that involves an independent factor
+    /// is enclosed and becomes an independent generator of the result, so the
+    /// result is a sound enclosure; the monomials in the dependent factors
+    /// alone stay exact.
+    ///
+    /// # Panics
+    ///
+    /// Panics if a matrix in `maps` is not `dim × dim`, or if an exponent of
+    /// the result overflows `u32`.
+    #[must_use]
+    pub fn quadratic_map(&self, maps: &[DMatrix<f64>]) -> Self {
+        let dim = self.dim();
+        assert!(
+            maps.iter().all(|m| m.shape() == (dim, dim)),
+            "every matrix of a quadratic map must be dim × dim"
+        );
+
+        // Promote each β to a temporary dependent factor, so the product is one polynomial.
+        let temp = FactorId::fresh_n(self.gi.ncols());
+        let all = hcat(&self.g, &self.gi);
+        let (ids, dep) = (self.id.len(), self.g.ncols());
+        let promoted = DMatrix::from_fn(ids + temp.len(), all.ncols(), |k, t| {
+            match (k < ids, t < dep) {
+                (true, true) => self.e[(k, t)],
+                (false, false) => u32::from(k - ids == t - dep),
+                _ => 0,
+            }
+        });
+        let columns: Vec<DVector<f64>> = all
+            .column_iter()
+            .map(nalgebra::Matrix::into_owned)
+            .collect();
+        let exponents: Vec<Vec<u32>> = promoted
+            .column_iter()
+            .map(|c| c.iter().copied().collect())
+            .collect();
+
+        let mut errs = RowErrors::new(maps.len());
+        let center = DVector::from_fn(maps.len(), |i, _| {
+            round::bilinear(&self.c, &maps[i], &self.c, i, &mut errs)
+        });
+        let mut gens = Vec::new();
+        let mut exps = Vec::new();
+        for t in 0..columns.len() {
+            // Linear terms: cᵀ Q hₜ + hₜᵀ Q c.
+            gens.push(symmetric_products(maps, &self.c, &columns[t], &mut errs));
+            exps.push(exponents[t].clone());
+            for u in t..columns.len() {
+                gens.push(if t == u {
+                    DVector::from_fn(maps.len(), |i, _| {
+                        round::bilinear(&columns[t], &maps[i], &columns[t], i, &mut errs)
+                    })
+                } else {
+                    symmetric_products(maps, &columns[t], &columns[u], &mut errs)
+                });
+                exps.push(add_exponents(&exponents[t], &exponents[u]));
+            }
+        }
+
+        let mut id = self.id.clone();
+        id.extend_from_slice(&temp);
+        Self {
+            c: center,
+            g: from_column_list(maps.len(), &gens),
+            gi: errs.generators(),
+            e: from_column_list(id.len(), &exps),
+            id,
+        }
+        .compact()
+        .enclose_factors(&temp)
     }
 
     /// Splits the domain of `factor` into `[-1, 0]` and `[0, 1]`. Each half
@@ -533,6 +650,44 @@ impl SparsePolyZonotope {
             })
             .collect()
     }
+}
+
+/// The parts of a set after [`SparsePolyZonotope::enclose_monomials`].
+struct Enclosed {
+    /// Center, shifted by the enclosed constant and `[0, 1]` monomials.
+    center: DVector<f64>,
+    /// Indices of the dependent generators that were not enclosed, in order.
+    kept: Vec<usize>,
+    /// New generators, one per enclosed non-constant monomial, each with its own `β`.
+    generators: Vec<DVector<f64>>,
+    /// Rounding-error bounds of the shifts and halvings.
+    errs: RowErrors,
+}
+
+/// `(aᵀ Qᵢ b + bᵀ Qᵢ a)ᵢ`, one entry per matrix, with rounding errors in `errs`.
+fn symmetric_products(
+    q: &[DMatrix<f64>],
+    a: &DVector<f64>,
+    b: &DVector<f64>,
+    errs: &mut RowErrors,
+) -> DVector<f64> {
+    DVector::from_fn(q.len(), |i, _| {
+        let a_b = round::bilinear(a, &q[i], b, i, errs);
+        let b_a = round::bilinear(b, &q[i], a, i, errs);
+        round::add(a_b, b_a, i, errs)
+    })
+}
+
+/// Exponents of the product of two monomials.
+///
+/// # Panics
+///
+/// Panics if an exponent overflows `u32`.
+fn add_exponents(a: &[u32], b: &[u32]) -> Vec<u32> {
+    a.iter()
+        .zip(b)
+        .map(|(x, y)| x.checked_add(*y).expect("exponent overflows u32"))
+        .collect()
 }
 
 /// `x^n`, via [`f64::powi`] with the `std` feature and repeated squaring without it.

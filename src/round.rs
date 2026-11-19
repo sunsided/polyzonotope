@@ -60,6 +60,18 @@ mod sound {
         split(pairs.fold(point(0.0), |acc, (a, b)| point(a).mul_add(point(b), acc)))
     }
 
+    /// `aᵀ Q b`, and a bound on its error.
+    pub(crate) fn bilinear(a: &DVector<f64>, q: &DMatrix<f64>, b: &DVector<f64>) -> (f64, f64) {
+        let mut acc = point(0.0);
+        for (j, &x) in a.iter().enumerate() {
+            for (k, &y) in b.iter().enumerate() {
+                acc = (point(x) * point(q[(j, k)])).mul_add(point(y), acc);
+            }
+        }
+
+        split(acc)
+    }
+
     /// An upper bound of `a + b`.
     pub(crate) fn add_up(a: f64, b: f64) -> f64 {
         (point(a) + point(b)).sup()
@@ -117,6 +129,11 @@ mod plain {
     /// `a · b`, with no error bound.
     pub(crate) fn mul(a: f64, b: f64) -> (f64, f64) {
         (a * b, 0.0)
+    }
+
+    /// `aᵀ Q b` by nalgebra, with no error bound.
+    pub(crate) fn bilinear(a: &DVector<f64>, q: &DMatrix<f64>, b: &DVector<f64>) -> (f64, f64) {
+        (a.dot(&(q * b)), 0.0)
     }
 
     /// `a + b`, taken as its own upper bound.
@@ -235,6 +252,44 @@ pub(crate) fn scaled(v: &DVector<f64>, s: f64, errs: &mut RowErrors) -> DVector<
         errs.record(i, e);
         p
     })
+}
+
+/// `leftᵀ matrix right`, with its rounding error recorded on `row` of `errs`.
+///
+/// # Panics
+///
+/// Panics if `matrix` is not `left.len() × right.len()`.
+pub(crate) fn bilinear(
+    left: &DVector<f64>,
+    matrix: &DMatrix<f64>,
+    right: &DVector<f64>,
+    row: usize,
+    errs: &mut RowErrors,
+) -> f64 {
+    assert_eq!(
+        matrix.shape(),
+        (left.len(), right.len()),
+        "matrix must match both vectors"
+    );
+    let (v, e) = backend::bilinear(left, matrix, right);
+    errs.record(row, e);
+    v
+}
+
+/// `a + b` for scalars, with the rounding error recorded on `row` of `errs`.
+pub(crate) fn add(a: f64, b: f64, row: usize, errs: &mut RowErrors) -> f64 {
+    let (v, e) = backend::add(a, b);
+    errs.record(row, e);
+    v
+}
+
+/// `v / 2`, for a half that is used twice: once to shift the center and once
+/// as a generator. Its rounding error (nonzero only for subnormals) is
+/// therefore recorded twice.
+pub(crate) fn halves(v: &DVector<f64>, errs: &mut RowErrors) -> DVector<f64> {
+    let half = scaled(v, 0.5, errs);
+    let _ = scaled(v, 0.5, errs);
+    half
 }
 
 /// An upper bound of `Σ |xᵢ|`.

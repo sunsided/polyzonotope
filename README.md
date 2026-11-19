@@ -34,6 +34,7 @@ Dependent factors carry global `FactorId`s, so sets derived from the same uncert
 |---|---|
 | `linear_map`, `translate`, `minkowski_sum`, `exact_plus`, `cartesian_product`, `compact`, `split` | exact |
 | `interval_hull`, `to_zonotope` | sound enclosure |
+| `quadratic_map` | exact without independent generators; otherwise the monomials with a `β` are enclosed |
 
 "Exact" means exact in real arithmetic. In `f64` the coefficients are rounded, unless you enable the `sound` feature (below).
 
@@ -115,7 +116,7 @@ rustflags = ["-C", "target-cpu=haswell"]
 ```
 
 ## Roadmap
-1. `quadratic_map`; order reduction (Girard, PCA); recursive split-based tight hulls.
+1. Order reduction (Girard, PCA); recursive split-based tight hulls.
 2. Halfspace intersection checks, containment heuristics, `plotters` visualization.
    An example that plans with an RRT and keeps an edge only if the reachable set along it misses every obstacle.
 3. Separate `polyzonotope-reach` crate: nonlinear reachability by conservative polynomialization (Althoff 2013), with a CORA cross-check.
