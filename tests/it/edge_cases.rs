@@ -127,3 +127,28 @@ fn split_rejects_inexact_exponents() {
     let pz = power(57);
     let _ = pz.split(pz.ids()[0]);
 }
+
+/// `α − α²` ranges over `[-2, 1/4]`; the plain hull says `[-2, 1]`, and
+/// splitting closes the gap at the top to the tolerance.
+#[test]
+fn split_hull_finds_the_true_maximum() {
+    let pz = SparsePolyZonotope::new(
+        DVector::zeros(1),
+        DMatrix::from_row_slice(1, 2, &[1.0, -1.0]),
+        DMatrix::zeros(1, 0),
+        DMatrix::from_row_slice(1, 2, &[1, 2]),
+        FactorId::fresh_n(1),
+    )
+    .expect("consistent shapes");
+
+    let coarse = pz.interval_hull().0[0];
+    let tight = pz.interval_hull_split(1e-4, 200).0[0];
+
+    assert!((coarse.hi - 1.0).abs() < 1e-12);
+    assert!(
+        tight.hi >= 0.25 && tight.hi <= 0.25 + 1e-3,
+        "upper bound {}",
+        tight.hi
+    );
+    assert!((tight.lo + 2.0).abs() < 1e-3, "lower bound {}", tight.lo);
+}

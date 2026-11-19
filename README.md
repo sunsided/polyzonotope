@@ -34,6 +34,7 @@ Dependent factors carry global `FactorId`s, so sets derived from the same uncert
 |---|---|
 | `linear_map`, `translate`, `minkowski_sum`, `exact_plus`, `cartesian_product`, `compact`, `split` | exact |
 | `interval_hull`, `to_zonotope` | sound enclosure |
+| `interval_hull_split(tol, max_splits)` | sound enclosure, tightened by branch and bound over `split` |
 | `quadratic_map` | exact without independent generators; otherwise the monomials with a `β` are enclosed |
 | `reduce` (`Reduction::Girard`, `Reduction::Pca`), also on `Zonotope` | sound enclosure with at most `order · dim` generators |
 
@@ -117,11 +118,10 @@ rustflags = ["-C", "target-cpu=haswell"]
 ```
 
 ## Roadmap
-1. Recursive split-based tight hulls.
-2. Halfspace intersection checks, containment heuristics, `plotters` visualization.
+1. Halfspace intersection checks, containment heuristics, `plotters` visualization.
    An example that plans with an RRT and keeps an edge only if the reachable set along it misses every obstacle.
-3. Separate `polyzonotope-reach` crate: nonlinear reachability by conservative polynomialization (Althoff 2013), with a CORA cross-check.
-4. Constrained polynomial zonotopes.
+2. Separate `polyzonotope-reach` crate: nonlinear reachability by conservative polynomialization (Althoff 2013), with a CORA cross-check.
+3. Constrained polynomial zonotopes.
 
 ## License
 

@@ -7,6 +7,8 @@ use portable_atomic::{AtomicU64, Ordering};
 
 use nalgebra::{DMatrix, DVector};
 
+mod hull;
+
 use crate::reduce::{self, Reduction};
 use crate::round::{self, RowErrors};
 use crate::{Interval, IntervalBox, Zonotope, from_column_list, hcat};
