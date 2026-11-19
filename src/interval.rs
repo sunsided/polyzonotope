@@ -1,5 +1,7 @@
 //! Closed intervals and axis-aligned interval boxes, the coarsest set representation.
 
+use alloc::vec::Vec;
+
 use nalgebra::DVector;
 
 /// Closed interval `[lo, hi]` of reals.
@@ -49,7 +51,7 @@ impl Interval {
     }
 }
 
-impl std::ops::Add for Interval {
+impl core::ops::Add for Interval {
     type Output = Interval;
 
     /// Minkowski sum `{ a + b | a ∈ self, b ∈ o }`, which is `[lo + o.lo, hi + o.hi]`.
