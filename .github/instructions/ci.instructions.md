@@ -23,7 +23,7 @@ summary: Keep task ci, ci.yml and hooks in sync; pinned, least-privilege workflo
 - `scripts/check-branch.sh` is the single definition of allowed branch names. It is used by
   the Taskfile, the hook and the CI `branch` job.
 - CI jobs in `ci.yml`: `branch`, `fmt`, `clippy`, `style` (separators, README links, typos,
-  mermaid), `doc`, `test` (ubuntu, macOS, Windows), `coverage`, `deny`, `msrv`. `actions-lint.yml`
+  mermaid), `doc`, `test` (ubuntu, macOS, Windows), `coverage`, `deny`, `msrv`, `semver` (PRs only). `actions-lint.yml`
   runs `actionlint` and `zizmor`. `coverage` is CI-only: it exists for the Codecov upload.
 - New jobs that should gate merges must also be added to branch protection. Mention that in
   the PR.
