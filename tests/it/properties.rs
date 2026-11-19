@@ -227,6 +227,12 @@ fn zonotope_coefficients(pz: &SparsePolyZonotope, s: &Sample) -> Vec<f64> {
         coeffs.push(if even { 2.0 * m - 1.0 } else { m });
     }
 
+    let q = pz.independent_generators().ncols();
+    assert!(
+        s.beta.len() >= q,
+        "sample holds {} β values for {q} independent generators",
+        s.beta.len()
+    );
     let independent = pz.independent_generators().column_iter().zip(&s.beta);
     coeffs.extend(
         independent
