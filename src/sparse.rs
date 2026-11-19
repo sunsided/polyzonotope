@@ -206,9 +206,18 @@ impl SparsePolyZonotope {
         );
 
         let a: Vec<f64> = self.id.iter().map(|&k| alpha(k)).collect();
+
+        self.evaluate_positional(&a, beta)
+    }
+
+    /// Point of the set for positional factor values: `a[k]` belongs to `ids()[k]`.
+    ///
+    /// Callers check that `a` has one entry per id and `beta` one entry per
+    /// independent generator.
+    fn evaluate_positional(&self, a: &[f64], beta: &[f64]) -> DVector<f64> {
         let mut p = &self.c + &self.gi * DVector::from_column_slice(beta);
         for i in 0..self.g.ncols() {
-            p += self.g.column(i) * self.monomial_value(i, &a);
+            p += self.g.column(i) * self.monomial_value(i, a);
         }
 
         p
@@ -231,10 +240,13 @@ impl SparsePolyZonotope {
     #[must_use]
     pub fn evaluate(&self, alpha: &[f64], beta: &[f64]) -> DVector<f64> {
         assert_eq!(alpha.len(), self.id.len(), "one α per factor");
+        assert_eq!(
+            beta.len(),
+            self.gi.ncols(),
+            "one β per independent generator"
+        );
 
-        let pos: HashMap<FactorId, usize> =
-            self.id.iter().enumerate().map(|(i, &k)| (k, i)).collect();
-        self.evaluate_with(|k| alpha[pos[&k]], beta)
+        self.evaluate_positional(alpha, beta)
     }
 
     /// Exact: `{ M x | x ∈ PZ }`.

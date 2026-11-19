@@ -87,6 +87,15 @@ proptest! {
         }
     }
 
+    /// Positional evaluation agrees with evaluation by id.
+    #[test]
+    fn evaluate_matches_evaluate_with(pz in arb_pz(), samples in arb_samples()) {
+        let (p, q) = (pz.ids().len(), pz.independent_generators().ncols());
+        for s in &samples {
+            prop_assert!(close(&pz.evaluate(&s.alpha[..p], &s.beta[..q]), &eval(&pz, s)));
+        }
+    }
+
     /// Compacting changes the representation, not the function of α and β.
     #[test]
     fn compact_preserves_the_function(pz in arb_pz(), samples in arb_samples()) {
