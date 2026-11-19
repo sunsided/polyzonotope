@@ -121,6 +121,28 @@ proptest! {
         }
     }
 
+    /// The Minkowski sum of a set with itself decorrelates the two copies:
+    /// `(p ⊕ p)(α₁, α₂) = p(α₁) + p(α₂)` for independent `α₁`, `α₂`.
+    #[test]
+    fn minkowski_sum_decorrelates_the_operands(pz in arb_pz(), s1 in arb_samples(), s2 in arb_samples()) {
+        let sum = pz.minkowski_sum(&pz);
+        // The second copy got fresh ids; compaction keeps the same factors of both copies, in order.
+        let (old, new): (Vec<FactorId>, Vec<FactorId>) =
+            sum.ids().iter().copied().partition(|id| pz.ids().contains(id));
+        prop_assert_eq!(old.len(), new.len());
+
+        let q = pz.independent_generators().ncols();
+        for (s1, s2) in s1.iter().zip(&s2) {
+            let (a1, a2) = (alpha_map(pz.ids(), s1), alpha_map(pz.ids(), s2));
+            let value = |id: FactorId| match new.iter().position(|&n| n == id) {
+                Some(j) => a2[&old[j]],
+                None => a1[&id],
+            };
+            let beta: Vec<f64> = s1.beta[..q].iter().chain(&s2.beta[..q]).copied().collect();
+            prop_assert!(close(&sum.evaluate_with(value, &beta), &(eval(&pz, s1) + eval(&pz, s2))));
+        }
+    }
+
     /// The Cartesian product of a set with its own image stacks both points
     /// for the same α: `(p × Mp)(α) = (p(α), M p(α))`.
     #[test]
