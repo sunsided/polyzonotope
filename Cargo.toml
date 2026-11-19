@@ -17,11 +17,16 @@ rustdoc-args = ["--html-in-header", "docs/mermaid.html"]
 [dependencies]
 nalgebra = { version = "0.35", default-features = false, features = ["alloc"] }
 portable-atomic = "1"
+inari = { version = "2", default-features = false, optional = true }
 
 [features]
 default = ["std"]
 # Uses `f64::powi` from std for monomial powers; without it, powers fall back to repeated squaring.
 std = ["nalgebra/std"]
+# Outward rounding via inari: enclosures are rounded outward and the exact operations add
+# generators that bound their rounding error. Needs x86-64 Haswell or newer (build with
+# `-C target-cpu=haswell`) or AArch64; see the README.
+sound = ["std", "dep:inari"]
 
 [dev-dependencies]
 criterion = "0.8"

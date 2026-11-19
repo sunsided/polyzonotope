@@ -69,10 +69,27 @@ pub fn alpha_map(ids: &[FactorId], s: &Sample) -> HashMap<FactorId, f64> {
 }
 
 /// The point of `pz` at the sample's factor values.
+///
+/// Independent generators beyond the sample, such as the rounding-error
+/// generators of the `sound` feature, get `β = 0`.
 pub fn eval(pz: &SparsePolyZonotope, s: &Sample) -> DVector<f64> {
     let a = alpha_map(pz.ids(), s);
 
-    pz.evaluate_with(|k| a[&k], &s.beta[..pz.independent_generators().ncols()])
+    pz.evaluate_with(
+        |k| a[&k],
+        &pad(&s.beta, pz.independent_generators().ncols()),
+    )
+}
+
+/// The first `len` values of `coeffs`, with zeros appended if it is shorter.
+///
+/// Exactness checks feed the coefficients of the operands and leave the
+/// generators the `sound` feature appends for rounding errors at zero; those
+/// generators only widen the set by a few ulps, well within [`TOL`].
+pub fn pad(coeffs: &[f64], len: usize) -> Vec<f64> {
+    (0..len)
+        .map(|j| coeffs.get(j).copied().unwrap_or(0.0))
+        .collect()
 }
 
 /// Whether `a` and `b` agree up to [`TOL`], relative to the magnitude of `a`.

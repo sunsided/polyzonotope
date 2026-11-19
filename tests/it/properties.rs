@@ -7,7 +7,7 @@ use polyzonotope::{FactorId, SparsePolyZonotope, Zonotope};
 use proptest::collection::vec;
 use proptest::prelude::*;
 
-use crate::strategies::{Sample, TOL, alpha_map, arb_pz, arb_samples, close, eval};
+use crate::strategies::{Sample, TOL, alpha_map, arb_pz, arb_samples, close, eval, pad};
 
 proptest! {
     /// Every sampled point of a set lies in its interval hull.
@@ -28,7 +28,7 @@ proptest! {
             let coeffs = zonotope_coefficients(&pz, s);
 
             prop_assert!(coeffs.iter().all(|c| c.abs() <= 1.0 + TOL));
-            prop_assert!(close(&z.evaluate(&coeffs), &eval(&pz, s)));
+            prop_assert!(close(&z.evaluate(&pad(&coeffs, z.num_generators())), &eval(&pz, s)));
         }
     }
 
@@ -110,9 +110,10 @@ proptest! {
             let both: Vec<f64> = coeffs.iter().chain(&other).copied().collect();
             let point = z.evaluate(&coeffs);
 
-            prop_assert!(close(&mapped.evaluate(&coeffs), &(&m * &point)));
-            prop_assert!(close(&moved.evaluate(&coeffs), &(&point + &v)));
-            prop_assert!(close(&sum.evaluate(&both), &(&point + z.evaluate(&other))));
+            let at = |z: &Zonotope, coeffs: &[f64]| z.evaluate(&pad(coeffs, z.num_generators()));
+            prop_assert!(close(&at(&mapped, &coeffs), &(&m * &point)));
+            prop_assert!(close(&at(&moved, &coeffs), &(&point + &v)));
+            prop_assert!(close(&at(&sum, &both), &(&point + z.evaluate(&other))));
         }
     }
 
@@ -148,8 +149,14 @@ proptest! {
             let q = pz.independent_generators().ncols();
             let beta = &s.beta[..q];
 
-            prop_assert_eq!(q, compacted.independent_generators().ncols());
-            prop_assert!(close(&compacted.evaluate_with(|k| a[&k], beta), &pz.evaluate_with(|k| a[&k], beta)));
+            // The original generators keep their positions; `sound` may append error bounds after them.
+            let q_compacted = compacted.independent_generators().ncols();
+            prop_assert!(q <= q_compacted);
+            prop_assert_eq!(compacted.independent_generators().columns(0, q).into_owned(), pz.independent_generators().clone());
+            prop_assert!(close(
+                &compacted.evaluate_with(|k| a[&k], &pad(beta, q_compacted)),
+                &pz.evaluate_with(|k| a[&k], beta),
+            ));
         }
     }
 
@@ -164,10 +171,11 @@ proptest! {
         for s in &samples {
             let a = alpha_map(pz.ids(), s);
             let beta = &s.beta[..q];
-            let expected = pz.evaluate_with(|k| a[&k], beta) + other.evaluate_with(|k| a[&k], beta);
+            let expected = pz.evaluate_with(|k| a[&k], beta) + other.evaluate_with(|k| a[&k], &pad(beta, other.independent_generators().ncols()));
 
             // Independent generators are concatenated, so feed the same β twice.
             let twice: Vec<f64> = beta.iter().chain(beta).copied().collect();
+            let twice = pad(&twice, sum.independent_generators().ncols());
             prop_assert!(close(&sum.evaluate_with(|k| a[&k], &twice), &expected));
         }
     }
@@ -190,6 +198,7 @@ proptest! {
                 None => a1[&id],
             };
             let beta: Vec<f64> = s1.beta[..q].iter().chain(&s2.beta[..q]).copied().collect();
+            let beta = pad(&beta, sum.independent_generators().ncols());
             prop_assert!(close(&sum.evaluate_with(value, &beta), &(eval(&pz, s1) + eval(&pz, s2))));
         }
     }
@@ -207,10 +216,11 @@ proptest! {
             let a = alpha_map(pz.ids(), s);
             let beta = &s.beta[..q];
             let top = pz.evaluate_with(|k| a[&k], beta);
-            let bottom = other.evaluate_with(|k| a[&k], beta);
+            let bottom = other.evaluate_with(|k| a[&k], &pad(beta, other.independent_generators().ncols()));
             let expected = DVector::from_iterator(2 * n, top.iter().chain(bottom.iter()).copied());
 
             let twice: Vec<f64> = beta.iter().chain(beta).copied().collect();
+            let twice = pad(&twice, product.independent_generators().ncols());
             prop_assert!(close(&product.evaluate_with(|k| a[&k], &twice), &expected));
         }
     }
@@ -230,7 +240,8 @@ proptest! {
                 let value = |id: FactorId| if Some(id) == new_id { t } else { a[&id] };
                 let orig = |id: FactorId| if id == k { f64::midpoint(t, sign) } else { a[&id] };
                 let beta = &s.beta[..q];
-                prop_assert!(close(&half.evaluate_with(value, beta), &pz.evaluate_with(orig, beta)));
+                let padded = pad(beta, half.independent_generators().ncols());
+                prop_assert!(close(&half.evaluate_with(value, &padded), &pz.evaluate_with(orig, beta)));
             }
         }
     }

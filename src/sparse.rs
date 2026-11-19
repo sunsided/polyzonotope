@@ -7,6 +7,7 @@ use portable_atomic::{AtomicU64, Ordering};
 
 use nalgebra::{DMatrix, DVector};
 
+use crate::round::{self, RowErrors};
 use crate::{Interval, IntervalBox, Zonotope, from_column_list, hcat};
 
 /// Global identifier of a dependent factor `α_k`.
@@ -259,10 +260,15 @@ impl SparsePolyZonotope {
     /// Panics if `m` does not have one column per dimension.
     #[must_use]
     pub fn linear_map(&self, m: &DMatrix<f64>) -> Self {
+        let mut errs = RowErrors::new(m.nrows());
+        let c = round::mat_vec(m, &self.c, &mut errs);
+        let g = round::mat_mul(m, &self.g, &mut errs);
+        let gi = round::mat_mul(m, &self.gi, &mut errs);
+
         Self {
-            c: m * &self.c,
-            g: m * &self.g,
-            gi: m * &self.gi,
+            c,
+            g,
+            gi: hcat(&gi, &errs.generators()),
             e: self.e.clone(),
             id: self.id.clone(),
         }
@@ -275,10 +281,13 @@ impl SparsePolyZonotope {
     /// Panics if `v` does not have the set's dimension.
     #[must_use]
     pub fn translate(&self, v: &DVector<f64>) -> Self {
+        let mut errs = RowErrors::new(self.dim());
+        let c = round::vec_add(&self.c, v, &mut errs);
+
         Self {
-            c: &self.c + v,
+            c,
             g: self.g.clone(),
-            gi: self.gi.clone(),
+            gi: hcat(&self.gi, &errs.generators()),
             e: self.e.clone(),
             id: self.id.clone(),
         }
@@ -311,10 +320,12 @@ impl SparsePolyZonotope {
     #[must_use]
     pub fn exact_plus(&self, other: &Self) -> Self {
         let (id, e1, e2) = merge_ids(self, other);
+        let mut errs = RowErrors::new(self.dim());
+        let c = round::vec_add(&self.c, &other.c, &mut errs);
         Self {
-            c: &self.c + &other.c,
+            c,
             g: hcat(&self.g, &other.g),
-            gi: hcat(&self.gi, &other.gi),
+            gi: hcat(&hcat(&self.gi, &other.gi), &errs.generators()),
             e: hcat(&e1, &e2),
             id,
         }
@@ -356,19 +367,22 @@ impl SparsePolyZonotope {
     /// and [`split`](Self::split). The price is that zero independent
     /// generators, e.g. from a singular [`linear_map`](Self::linear_map), are
     /// never reclaimed here; [`to_zonotope`](Self::to_zonotope) leaves them out.
+    /// With the `sound` feature, bounds on the rounding error of the merged
+    /// sums are appended after them.
     #[must_use]
     pub fn compact(&self) -> Self {
         let n = self.dim();
         let mut c = self.c.clone();
+        let mut errs = RowErrors::new(n);
         let mut columns: Vec<(Vec<u32>, DVector<f64>)> = Vec::new();
         let mut index: BTreeMap<Vec<u32>, usize> = BTreeMap::new();
         for i in 0..self.g.ncols() {
             let exp: Vec<u32> = self.e.column(i).iter().copied().collect();
             let gv = self.g.column(i).into_owned();
             if exp.iter().all(|&x| x == 0) {
-                c += gv;
+                round::add_into(&mut c, &gv, &mut errs);
             } else if let Some(&j) = index.get(&exp) {
-                columns[j].1 += gv;
+                round::add_into(&mut columns[j].1, &gv, &mut errs);
             } else {
                 index.insert(exp.clone(), columns.len());
                 columns.push((exp, gv));
@@ -382,7 +396,7 @@ impl SparsePolyZonotope {
         Self {
             c,
             g: DMatrix::from_fn(n, columns.len(), |i, j| columns[j].1[i]),
-            gi: self.gi.clone(),
+            gi: hcat(&self.gi, &errs.generators()),
             e: DMatrix::from_fn(used.len(), columns.len(), |k, j| columns[j].0[used[k]]),
             id: used.iter().map(|&k| self.id[k]).collect(),
         }
@@ -401,7 +415,8 @@ impl SparsePolyZonotope {
     }
 
     /// Interval enclosure (treats every monomial as independent, so it is
-    /// sound but can be loose; tighten with [`split`](Self::split)).
+    /// sound but can be loose; tighten with [`split`](Self::split)). With the
+    /// `sound` feature the bounds are rounded outward.
     #[must_use]
     pub fn interval_hull(&self) -> IntervalBox {
         let mut iv: Vec<Interval> = self.c.iter().map(|&x| Interval::point(x)).collect();
@@ -413,7 +428,7 @@ impl SparsePolyZonotope {
         }
 
         for (i, row) in self.gi.row_iter().enumerate() {
-            let r: f64 = row.iter().map(|x| x.abs()).sum();
+            let r = round::abs_sum_up(row.iter());
             iv[i] = iv[i] + Interval::new(-r, r);
         }
 
@@ -427,15 +442,18 @@ impl SparsePolyZonotope {
     /// [`Zonotope::order`] counts only generators that shape the set.
     #[must_use]
     pub fn to_zonotope(&self) -> Zonotope {
+        let n = self.dim();
         let mut c = self.c.clone();
+        let mut errs = RowErrors::new(n);
         let mut gens = Vec::with_capacity(self.g.ncols() + self.gi.ncols());
         for j in 0..self.g.ncols() {
             let g = self.g.column(j).into_owned();
             match self.monomial_range(j) {
-                MonomialRange::Constant => c += g,
+                MonomialRange::Constant => round::add_into(&mut c, &g, &mut errs),
                 MonomialRange::UnitRange => {
-                    c += &g * 0.5;
-                    gens.push(g * 0.5);
+                    let half = round::scaled(&g, 0.5, &mut errs);
+                    round::add_into(&mut c, &half, &mut errs);
+                    gens.push(half);
                 }
                 MonomialRange::Symmetric => gens.push(g),
             }
@@ -443,8 +461,7 @@ impl SparsePolyZonotope {
 
         gens.extend(self.gi.column_iter().map(nalgebra::Matrix::into_owned));
         gens.retain(|g| g.iter().any(|&x| x != 0.0));
-        let n = self.dim();
-        Zonotope::new(c, from_column_list(n, &gens))
+        Zonotope::new(c, hcat(&from_column_list(n, &gens), &errs.generators()))
     }
 
     /// Splits the domain of `factor` into `[-1, 0]` and `[0, 1]`. Each half
@@ -453,7 +470,9 @@ impl SparsePolyZonotope {
     ///
     /// # Panics
     ///
-    /// Panics if `factor` is not one of [`ids`](Self::ids).
+    /// Panics if `factor` is not one of [`ids`](Self::ids), or if it appears
+    /// with an exponent above 50, where the binomial coefficients of the
+    /// rescaling are no longer exact in `f64`.
     #[must_use]
     pub fn split(&self, factor: FactorId) -> (Self, Self) {
         let k = self
@@ -470,10 +489,12 @@ impl SparsePolyZonotope {
     fn half_domain(&self, k: usize, sign: f64) -> Self {
         let mut gens: Vec<DVector<f64>> = Vec::new();
         let mut exps: Vec<Vec<u32>> = Vec::new();
+        let mut errs = RowErrors::new(self.dim());
         for i in 0..self.g.ncols() {
+            let column = self.g.column(i).into_owned();
             for (exp, coef) in self.expand_rescaled(i, k, sign) {
                 exps.push(exp);
-                gens.push(self.g.column(i) * coef);
+                gens.push(round::scaled(&column, coef, &mut errs));
             }
         }
 
@@ -484,7 +505,7 @@ impl SparsePolyZonotope {
         Self {
             c: self.c.clone(),
             g: from_column_list(n, &gens),
-            gi: self.gi.clone(),
+            gi: hcat(&self.gi, &errs.generators()),
             e: from_column_list(p, &exps),
             id,
         }
@@ -497,6 +518,10 @@ impl SparsePolyZonotope {
     /// `(α'/2 + sign/2)^d = Σ_j C(d, j) (1/2)^d α'^j sign^(d-j)`.
     fn expand_rescaled(&self, i: usize, k: usize, sign: f64) -> Vec<(Vec<u32>, f64)> {
         let d = self.e[(k, i)];
+        assert!(
+            d <= MAX_SPLIT_EXPONENT,
+            "split needs exponents of at most {MAX_SPLIT_EXPONENT}, found {d}"
+        );
 
         (0..=d)
             .map(|j| {
@@ -536,9 +561,21 @@ fn pow_by_squaring(mut x: f64, mut n: u32) -> f64 {
     acc
 }
 
-/// Binomial coefficient `C(n, k)` as `f64`, for `k <= n`.
+/// Largest exponent [`SparsePolyZonotope::split`] accepts: every `C(d, j)` with
+/// `d <= 50` stays below `2^53`, so [`binomial`] and the coefficients
+/// `C(d, j) / 2^d` of the rescaling are exact.
+const MAX_SPLIT_EXPONENT: u32 = 50;
+
+/// Binomial coefficient `C(n, k)` for `k <= n`, exact for `n <=` [`MAX_SPLIT_EXPONENT`].
+///
+/// Integer arithmetic keeps every step exact: `C(n, i) (n - i)` is divisible by
+/// `i + 1` and below `2^63` for those `n`.
+#[expect(
+    clippy::cast_precision_loss,
+    reason = "C(n, k) < 2^53 for n <= MAX_SPLIT_EXPONENT, so the conversion is exact"
+)]
 fn binomial(n: u32, k: u32) -> f64 {
-    (0..k).fold(1.0, |acc, i| acc * f64::from(n - i) / f64::from(i + 1))
+    (0..k).fold(1u64, |acc, i| acc * u64::from(n - i) / u64::from(i + 1)) as f64
 }
 
 /// Union of the two id lists, with both exponent matrices re-indexed to it.

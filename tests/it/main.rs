@@ -2,4 +2,6 @@
 
 mod edge_cases;
 mod properties;
+#[cfg(feature = "sound")]
+mod sound;
 mod strategies;

@@ -1,0 +1,5 @@
+# inari (the `sound` feature) needs AVX2 and FMA on x86-64. Every --all-features build of
+# this repository enables it, so build for Haswell here. Crates that depend on polyzonotope
+# with `sound` need the same flag in their own configuration.
+[target.'cfg(target_arch = "x86_64")']
+rustflags = ["-C", "target-cpu=haswell"]
