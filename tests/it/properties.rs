@@ -156,7 +156,7 @@ proptest! {
             for (half, sign) in [(&lo, -1.0), (&hi, 1.0)] {
                 let new_id = half.ids().iter().copied().find(|id| !pz.ids().contains(id));
                 let value = |id: FactorId| if Some(id) == new_id { t } else { a[&id] };
-                let orig = |id: FactorId| if id == k { (t + sign) / 2.0 } else { a[&id] };
+                let orig = |id: FactorId| if id == k { f64::midpoint(t, sign) } else { a[&id] };
                 let beta = &s.beta[..q];
                 prop_assert!(close(&half.evaluate_with(value, &beta[..half.independent_generators().ncols()]), &pz.evaluate_with(orig, beta)));
             }
