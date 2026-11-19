@@ -39,6 +39,7 @@ Dependent factors carry global `FactorId`s, so sets derived from the same uncert
 | `reduce` (`Reduction::Girard`, `Reduction::Pca`), also on `Zonotope` | sound enclosure with at most `order · dim` generators |
 
 | `intersection(&polytope, max_splits)`, `containment(&polytope, max_splits)`, also on `Zonotope` | three-valued check: `Disjoint` / `Inside` are proofs, the other answers are not |
+| `split_pieces(splits)`, `Zonotope::polygon` (2-D) | exact pieces; a polygon outline for drawing |
 
 "Exact" means exact in real arithmetic. In `f64` the coefficients are rounded, unless you enable the `sound` feature (below).
 
@@ -86,6 +87,8 @@ assert_eq!((hull.0[1].lo, hull.0[1].hi), (0.0, 1.0));
 ```bash
 cargo test
 cargo run --example quadratic_dependency   # {(α, α²)}: split, rotate and enclose the parabola
+cargo run --example plot_sets              # target/plots/sets.svg: the parabola, its enclosure and split pieces
+cargo run --example rrt_reach              # target/plots/rrt.svg: an RRT that keeps only provably safe edges
 ```
 
 ## `no_std`
@@ -130,10 +133,8 @@ rustflags = ["-C", "target-cpu=haswell"]
 ```
 
 ## Roadmap
-1. `plotters` visualization.
-   An example that plans with an RRT and keeps an edge only if the reachable set along it misses every obstacle.
-2. Separate `polyzonotope-reach` crate: nonlinear reachability by conservative polynomialization (Althoff 2013), with a CORA cross-check.
-3. Constrained polynomial zonotopes.
+1. Separate `polyzonotope-reach` crate: nonlinear reachability by conservative polynomialization (Althoff 2013), with a CORA cross-check.
+2. Constrained polynomial zonotopes.
 
 ## License
 

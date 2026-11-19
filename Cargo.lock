@@ -632,6 +632,7 @@ dependencies = [
  "criterion",
  "inari",
  "nalgebra",
+ "plotters",
  "portable-atomic",
  "proptest",
 ]

@@ -79,6 +79,38 @@ impl SparsePolyZonotope {
         verdict
     }
 
+    /// Pieces whose union is the set, from `splits` splits of the widest
+    /// piece along its heaviest factor; fewer if no piece has a factor left.
+    ///
+    /// Each piece is exact. Their zonotope enclosures together hug the set
+    /// much tighter than [`to_zonotope`](Self::to_zonotope) alone, which is
+    /// what plots of curved sets use.
+    #[must_use]
+    pub fn split_pieces(&self, splits: usize) -> Vec<Self> {
+        let width = |pz: &Self| {
+            pz.interval_hull()
+                .0
+                .iter()
+                .map(crate::Interval::width)
+                .sum::<f64>()
+        };
+        let mut pieces = vec![self.clone()];
+        for _ in 0..splits {
+            let splittable =
+                (0..pieces.len()).filter_map(|i| Some((i, pieces[i].heaviest_factor_overall()?)));
+            let Some((i, factor)) =
+                splittable.max_by(|a, b| width(&pieces[a.0]).total_cmp(&width(&pieces[b.0])))
+            else {
+                break;
+            };
+            let (lower, upper) = pieces.swap_remove(i).split(factor);
+            pieces.push(lower);
+            pieces.push(upper);
+        }
+
+        pieces
+    }
+
     /// The 1-D set `{ aᵀ x | x ∈ self }` for the facet normal `a`.
     fn along(&self, h: &Halfspace) -> Self {
         self.linear_map(&DMatrix::from_row_slice(

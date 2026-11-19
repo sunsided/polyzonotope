@@ -196,6 +196,53 @@ impl Zonotope {
         SparsePolyZonotope::from_zonotope(self).containment(p, max_splits)
     }
 
+    /// Vertices of a 2-D zonotope in counter-clockwise order, for drawing.
+    ///
+    /// Sorts the generators by angle and walks around the boundary, adding
+    /// each one twice. Computed in plain `f64`, so it is an outline, not an
+    /// enclosure. A zonotope without nonzero generators gives its center.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the zonotope is not two-dimensional.
+    #[must_use]
+    pub fn polygon(&self) -> Vec<[f64; 2]> {
+        assert_eq!(self.dim(), 2, "polygon needs a two-dimensional zonotope");
+        // Point every generator into the half plane of angles in [0, π), then sort by angle.
+        let mut gens: Vec<[f64; 2]> = self
+            .generators
+            .column_iter()
+            .filter(|g| g[0] != 0.0 || g[1] != 0.0)
+            .map(|g| {
+                if g[1] < 0.0 || (g[1] == 0.0 && g[0] < 0.0) {
+                    [-g[0], -g[1]]
+                } else {
+                    [g[0], g[1]]
+                }
+            })
+            .collect();
+        // Within a half plane, a comes first when b lies counter-clockwise of it.
+        gens.sort_by(|a, b| 0.0f64.total_cmp(&(a[0] * b[1] - a[1] * b[0])));
+
+        // Start at the lowest vertex, c − Σ g, then go up the right side and down the left.
+        let mut p = [self.center[0], self.center[1]];
+        for g in &gens {
+            p = [p[0] - g[0], p[1] - g[1]];
+        }
+        let mut vertices = alloc::vec![p];
+        for sign in [2.0, -2.0] {
+            for g in &gens {
+                p = [p[0] + sign * g[0], p[1] + sign * g[1]];
+                vertices.push(p);
+            }
+        }
+        if !gens.is_empty() {
+            vertices.pop(); // back at the start
+        }
+
+        vertices
+    }
+
     /// Tight interval enclosure (rounded outward with the `sound` feature).
     #[must_use]
     pub fn interval_hull(&self) -> IntervalBox {
