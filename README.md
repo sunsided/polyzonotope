@@ -14,6 +14,8 @@ Sparse polynomial zonotopes (Kochdumper & Althoff, IEEE TAC 2021), zonotopes, an
 
 Say you have a drone, a robot arm or a cruise controller, and you don't know its state exactly: the sensors are a bit off, the payload is somewhere between 2 and 3 kg, and there is wind. A simulation with your best guess gives you one trajectory, but what you'd actually like to know is where the system could *possibly* end up, for every value the uncertain parts might take. If none of those places is the wall, you're fine; if one of them is, you'd rather find out on paper. That question is called reachability analysis, and the trick is to push a whole set of states through the model at once, instead of one point at a time.
 
+This is the counterpart to sampling-based planners such as rapidly-exploring random trees (RRT). An RRT grows a tree of single trajectories until one of them reaches the goal, so it finds *a* way there, assuming everything happens exactly as computed. Reachability asks the opposite question: whether *any* of the possible outcomes is unsafe. The two combine well, since the planner proposes a path and the reachable set of the system following it shows that the path stays safe under the uncertainty.
+
 How well that works depends on how the set is described. This crate has three descriptions, from coarse to fine:
 
 - An interval box is one range per axis ("x between 1 and 2, y between 0 and 5"). It is cheap, but it loses shape quickly: rotate a box and you have to wrap the rotated box in a new, bigger one; repeated over many steps, this wrapping effect makes the box far larger than the set inside it.
@@ -85,6 +87,7 @@ Arithmetic is plain `f64` for now. A sound mode with outward rounding (`inari`) 
 ## Roadmap
 1. Sound interval mode; `quadratic_map`; order reduction (Girard, PCA); recursive split-based tight hulls.
 2. Halfspace intersection checks, containment heuristics, `plotters` visualization.
+   An example that plans with an RRT and keeps an edge only if the reachable set along it misses every obstacle.
 3. Separate `polyzonotope-reach` crate: nonlinear reachability by conservative polynomialization (Althoff 2013), with a CORA cross-check.
 4. Constrained polynomial zonotopes.
 
