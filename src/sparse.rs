@@ -146,8 +146,8 @@ impl SparsePolyZonotope {
     pub fn from_zonotope(z: &Zonotope) -> Self {
         let m = z.num_generators();
         Self {
-            c: z.center.clone(),
-            g: z.generators.clone(),
+            c: z.center().clone(),
+            g: z.generators().clone(),
             gi: DMatrix::zeros(z.dim(), 0),
             e: DMatrix::identity(m, m),
             id: FactorId::fresh_n(m),

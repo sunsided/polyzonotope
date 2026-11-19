@@ -8,9 +8,9 @@ use crate::{Interval, IntervalBox, hcat};
 #[derive(Clone, Debug, PartialEq)]
 pub struct Zonotope {
     /// Center `c`; its length is the dimension of the set.
-    pub center: DVector<f64>,
-    /// `dim × m` generator matrix.
-    pub generators: DMatrix<f64>,
+    center: DVector<f64>,
+    /// `dim × m` generator matrix; one row per entry of [`center`](Self::center).
+    generators: DMatrix<f64>,
 }
 
 impl Zonotope {
@@ -39,6 +39,18 @@ impl Zonotope {
         ));
 
         Self::new(c, g)
+    }
+
+    /// Center `c`.
+    #[must_use]
+    pub fn center(&self) -> &DVector<f64> {
+        &self.center
+    }
+
+    /// Generator matrix `G`, one generator per column and one row per dimension.
+    #[must_use]
+    pub fn generators(&self) -> &DMatrix<f64> {
+        &self.generators
     }
 
     /// Dimension of the space the set lives in.
