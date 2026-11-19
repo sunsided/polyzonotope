@@ -249,6 +249,37 @@ proptest! {
     }
 }
 
+proptest! {
+    /// Every point `x` of a set maps to `(xᵀ Qᵢ x)ᵢ`, which lies in the hull of
+    /// the quadratic map; without independent generators the map is exact.
+    #[test]
+    fn quadratic_map_commutes_with_evaluation(
+        pz in arb_pz(),
+        q in vec(-2.0..2.0f64, 18),
+        outputs in 1usize..=2,
+        samples in arb_samples(),
+    ) {
+        let n = pz.dim();
+        let q: Vec<DMatrix<f64>> = (0..outputs)
+            .map(|o| DMatrix::from_fn(n, n, |i, j| q[o * 9 + i * 3 + j]))
+            .collect();
+        let mapped = pz.quadratic_map(&q);
+        let hull = mapped.interval_hull();
+        let exact = pz.independent_generators().ncols() == 0;
+        for s in &samples {
+            let x = eval(&pz, s);
+            let y = DVector::from_fn(outputs, |o, _| x.dot(&(&q[o] * &x)));
+
+            prop_assert!(hull.contains(&y, TOL * (1.0 + y.amax())));
+            if exact {
+                let a = alpha_map(pz.ids(), s);
+                let beta = pad(&[], mapped.independent_generators().ncols());
+                prop_assert!(close(&mapped.evaluate_with(|k| a[&k], &beta), &y));
+            }
+        }
+    }
+}
+
 /// The coefficients that make `pz.to_zonotope()` hit the point `eval(pz, s)`.
 ///
 /// Mirrors the generator order of [`SparsePolyZonotope::to_zonotope`]: constant

@@ -126,6 +126,17 @@ proptest! {
     }
 }
 
+proptest! {
+    /// `{ c² }` as the quadratic map of the point `c` with `Q = [1]`: the
+    /// stored center plus the error generator covers the exact square.
+    #[test]
+    fn quadratic_map_encloses_the_exact_square(c in 1.0..1e3f64) {
+        let mapped = one_factor_pz(c, &[], &[]).quadratic_map(&[DMatrix::from_element(1, 1, 1.0)]);
+
+        prop_assert!(within(two_product(c, c), mapped.center()[0], radius(mapped.independent_generators())));
+    }
+}
+
 /// `3 · 0.1` rounds up in `f64`, so the plain center misses the exact product;
 /// the sound map adds an error generator that covers it.
 #[test]
