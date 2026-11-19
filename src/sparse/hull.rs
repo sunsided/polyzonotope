@@ -30,7 +30,13 @@ impl SparsePolyZonotope {
                 .map(|i| {
                     let hi = self.tight_upper_bound(i, 1.0, tol, max_splits);
                     let lo = -self.tight_upper_bound(i, -1.0, tol, max_splits);
-                    Interval::new(lo.max(coarse.0[i].lo), hi.min(coarse.0[i].hi))
+                    let (lo, hi) = (lo.max(coarse.0[i].lo), hi.min(coarse.0[i].hi));
+                    // Plain-mode rounding can cross the bounds of a near-degenerate set.
+                    if lo <= hi {
+                        Interval::new(lo, hi)
+                    } else {
+                        coarse.0[i]
+                    }
                 })
                 .collect(),
         )
