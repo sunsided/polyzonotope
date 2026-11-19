@@ -94,8 +94,9 @@ proptest! {
         let z = pz.to_zonotope();
         let converted = SparsePolyZonotope::from_zonotope(&z);
         for s in &samples {
-            let coeffs = &s.beta[..z.num_generators()];
-            prop_assert!(close(&converted.evaluate(coeffs, &[]), &z.evaluate(coeffs)));
+            // Cyclic, so the coefficient count is not bounded by the sample length.
+            let coeffs: Vec<f64> = (0..z.num_generators()).map(|j| s.beta[j % s.beta.len()]).collect();
+            prop_assert!(close(&converted.evaluate(&coeffs, &[]), &z.evaluate(&coeffs)));
         }
     }
 
