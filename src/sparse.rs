@@ -6,7 +6,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use nalgebra::{DMatrix, DVector};
 
-use crate::{Interval, IntervalBox, Zonotope, hcat};
+use crate::{Interval, IntervalBox, Zonotope, from_column_list, hcat};
 
 /// Global identifier of a dependent factor `α_k`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -260,7 +260,8 @@ impl SparsePolyZonotope {
             c: m * &self.c,
             g: m * &self.g,
             gi: m * &self.gi,
-            ..self.clone()
+            e: self.e.clone(),
+            id: self.id.clone(),
         }
     }
 
@@ -273,7 +274,10 @@ impl SparsePolyZonotope {
     pub fn translate(&self, v: &DVector<f64>) -> Self {
         Self {
             c: &self.c + v,
-            ..self.clone()
+            g: self.g.clone(),
+            gi: self.gi.clone(),
+            e: self.e.clone(),
+            id: self.id.clone(),
         }
     }
 
@@ -431,7 +435,7 @@ impl SparsePolyZonotope {
 
         gens.extend(self.gi.column_iter().map(nalgebra::Matrix::into_owned));
         let n = self.dim();
-        Zonotope::new(c, DMatrix::from_fn(n, gens.len(), |i, j| gens[j][i]))
+        Zonotope::new(c, from_column_list(n, &gens))
     }
 
     /// Splits the domain of `factor` into `[-1, 0]` and `[0, 1]`. Each half
@@ -470,9 +474,9 @@ impl SparsePolyZonotope {
 
         Self {
             c: self.c.clone(),
-            g: DMatrix::from_fn(n, gens.len(), |r, c| gens[c][r]),
+            g: from_column_list(n, &gens),
             gi: self.gi.clone(),
-            e: DMatrix::from_fn(p, exps.len(), |r, c| exps[c][r]),
+            e: from_column_list(p, &exps),
             id,
         }
         .compact()
