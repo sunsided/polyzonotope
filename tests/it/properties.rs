@@ -87,6 +87,18 @@ proptest! {
         }
     }
 
+    /// Converting a zonotope turns each generator into its own factor, so
+    /// the coefficients of the zonotope serve as the α values unchanged.
+    #[test]
+    fn from_zonotope_is_exact(pz in arb_pz(), samples in arb_samples()) {
+        let z = pz.to_zonotope();
+        let converted = SparsePolyZonotope::from_zonotope(&z);
+        for s in &samples {
+            let coeffs = &s.beta[..z.num_generators()];
+            prop_assert!(close(&converted.evaluate(coeffs, &[]), &z.evaluate(coeffs)));
+        }
+    }
+
     /// Positional evaluation agrees with evaluation by id.
     #[test]
     fn evaluate_matches_evaluate_with(pz in arb_pz(), samples in arb_samples()) {
