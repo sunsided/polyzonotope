@@ -6,7 +6,7 @@
 //! the operation appended, without any further rounding on the way.
 
 use nalgebra::{DMatrix, DVector};
-use polyzonotope::{FactorId, Interval, IntervalBox, SparsePolyZonotope, Zonotope};
+use polyzonotope::{FactorId, Interval, IntervalBox, Reduction, SparsePolyZonotope, Zonotope};
 use proptest::prelude::*;
 
 /// The exact product `a · b` as `p + e`, with `p` rounded and `e` its error.
@@ -134,6 +134,19 @@ proptest! {
         let mapped = one_factor_pz(c, &[], &[]).quadratic_map(&[DMatrix::from_element(1, 1, 1.0)]);
 
         prop_assert!(within(two_product(c, c), mapped.center()[0], radius(mapped.independent_generators())));
+    }
+}
+
+proptest! {
+    /// Girard's box of two parallel 1-D generators `a` and `b` has radius at
+    /// least `|a| + |b|`, exactly, after reducing to order 1.
+    #[test]
+    fn girard_box_covers_the_exact_radius(a in 1.0..1e3f64, b in 1e-6..1e-3f64) {
+        let z = Zonotope::new(DVector::zeros(1), DMatrix::from_row_slice(1, 2, &[a, b]));
+        let reduced = z.reduce(1.0, Reduction::Girard);
+
+        prop_assert_eq!(reduced.num_generators(), 1);
+        prop_assert!(within(two_sum(a, b), 0.0, radius(reduced.generators())));
     }
 }
 
