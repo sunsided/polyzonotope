@@ -7,11 +7,13 @@ extern crate alloc;
 extern crate std;
 
 mod interval;
+mod reduce;
 mod round;
 mod sparse;
 mod zonotope;
 
 pub use interval::{Interval, IntervalBox};
+pub use reduce::Reduction;
 pub use sparse::{FactorId, ShapeError, SparsePolyZonotope};
 pub use zonotope::Zonotope;
 

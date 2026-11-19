@@ -35,6 +35,7 @@ Dependent factors carry global `FactorId`s, so sets derived from the same uncert
 | `linear_map`, `translate`, `minkowski_sum`, `exact_plus`, `cartesian_product`, `compact`, `split` | exact |
 | `interval_hull`, `to_zonotope` | sound enclosure |
 | `quadratic_map` | exact without independent generators; otherwise the monomials with a `β` are enclosed |
+| `reduce` (`Reduction::Girard`, `Reduction::Pca`), also on `Zonotope` | sound enclosure with at most `order · dim` generators |
 
 "Exact" means exact in real arithmetic. In `f64` the coefficients are rounded, unless you enable the `sound` feature (below).
 
@@ -102,7 +103,7 @@ By default, arithmetic is plain `f64`. An enclosure can then miss a point by a f
 - Every operation listed as exact computes its new coefficients in interval arithmetic. It stores their midpoints and adds one axis-aligned generator for each dimension whose rounding error is nonzero: an independent generator for a `SparsePolyZonotope`, a plain generator for a `Zonotope`. The result then encloses the set real arithmetic would give.
 - Every coefficient must be finite. This is a precondition, not a check: a NaN or an infinity panics once the arithmetic touches it, but coefficients an operation only copies pass through unchecked.
 
-So under `sound`, the number of generators can grow after any exact operation, and so can the number of `β` values that positional `evaluate` expects. That is up to `2 · dim` per call, since `exact_plus` and `split` append one batch and their internal `compact` may append another. Cargo unifies features across the dependency graph, so read the count instead of assuming it: `independent_generators().ncols()` on a `SparsePolyZonotope`, `num_generators()` on a `Zonotope`. The error generators pile up over long chains of operations. Order reduction (on the roadmap) merges them again.
+So under `sound`, the number of generators can grow after any exact operation, and so can the number of `β` values that positional `evaluate` expects. That is up to `2 · dim` per call, since `exact_plus` and `split` append one batch and their internal `compact` may append another. Cargo unifies features across the dependency graph, so read the count instead of assuming it: `independent_generators().ncols()` on a `SparsePolyZonotope`, `num_generators()` on a `Zonotope`. The error generators pile up over long chains of operations. `reduce` folds them back into a box.
 
 ```toml
 polyzonotope = { version = "0.2", features = ["sound"] }
@@ -116,7 +117,7 @@ rustflags = ["-C", "target-cpu=haswell"]
 ```
 
 ## Roadmap
-1. Order reduction (Girard, PCA); recursive split-based tight hulls.
+1. Recursive split-based tight hulls.
 2. Halfspace intersection checks, containment heuristics, `plotters` visualization.
    An example that plans with an RRT and keeps an edge only if the reachable set along it misses every obstacle.
 3. Separate `polyzonotope-reach` crate: nonlinear reachability by conservative polynomialization (Althoff 2013), with a CORA cross-check.

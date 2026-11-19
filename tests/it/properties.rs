@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 
 use nalgebra::{DMatrix, DVector};
-use polyzonotope::{FactorId, SparsePolyZonotope, Zonotope};
+use polyzonotope::{FactorId, Reduction, SparsePolyZonotope, Zonotope};
 use proptest::collection::vec;
 use proptest::prelude::*;
 
@@ -277,6 +277,86 @@ proptest! {
                 prop_assert!(close(&mapped.evaluate_with(|k| a[&k], &beta), &y));
             }
         }
+    }
+}
+
+proptest! {
+    /// A reduced zonotope contains the original: its support function is at
+    /// least as large in every sampled direction, and it meets the order.
+    #[test]
+    fn zonotope_reduce_encloses_the_original(
+        pz in arb_pz(),
+        extra in arb_pz(),
+        order in 1.0..2.5f64,
+        pca in any::<bool>(),
+        directions in vec(vec(-1.0..1.0f64, 3), 1..10),
+    ) {
+        let z = pz.to_zonotope();
+        // Stack more generators so the reduction has something to do.
+        let z = z.minkowski_sum(&z.linear_map(&DMatrix::from_fn(z.dim(), z.dim(), |i, j| {
+            extra.center()[(i + j) % extra.dim()]
+        })));
+        let method = if pca { Reduction::Pca } else { Reduction::Girard };
+        let reduced = z.reduce(order, method);
+
+        prop_assert!(reduced.num_generators() <= max_generators(order, z.dim(), method));
+        for d in &directions {
+            let d = DVector::from_column_slice(&d[..z.dim()]);
+            let (outer, inner) = (support(&reduced, &d), support(&z, &d));
+            prop_assert!(outer >= inner - TOL * (1.0 + inner.abs()), "{outer} < {inner}");
+        }
+    }
+
+    /// Every sampled point of a set lies in the reduced set, as seen by the
+    /// support function of the reduced set's zonotope enclosure.
+    #[test]
+    fn pz_reduce_encloses_every_point(
+        pz in arb_pz(),
+        order in 1.0..2.5f64,
+        pca in any::<bool>(),
+        directions in vec(vec(-1.0..1.0f64, 3), 1..10),
+        samples in arb_samples(),
+    ) {
+        let method = if pca { Reduction::Pca } else { Reduction::Girard };
+        let reduced = pz.reduce(order, method);
+        let count = reduced.dependent_generators().ncols() + reduced.independent_generators().ncols();
+        let enclosure = reduced.to_zonotope();
+
+        prop_assert!(count <= max_generators(order, pz.dim(), method));
+        for s in &samples {
+            let x = eval(&pz, s);
+            for d in &directions {
+                let d = DVector::from_column_slice(&d[..pz.dim()]);
+                let h = support(&enclosure, &d);
+                prop_assert!(d.dot(&x) <= h + TOL * (1.0 + h.abs()));
+            }
+        }
+    }
+}
+
+/// The support function `max { dᵀ x | x ∈ Z } = dᵀ c + Σ |dᵀ gⱼ|`.
+fn support(z: &Zonotope, d: &DVector<f64>) -> f64 {
+    d.dot(z.center())
+        + z.generators()
+            .column_iter()
+            .map(|g| d.dot(&g).abs())
+            .sum::<f64>()
+}
+
+/// Most generators a reduction to `order` may leave: `order · dim`, plus `dim`
+/// rounding-error generators for PCA in sound mode.
+#[expect(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    clippy::cast_precision_loss,
+    reason = "small non-negative counts"
+)]
+fn max_generators(order: f64, dim: usize, method: Reduction) -> usize {
+    let budget = (order * dim as f64) as usize;
+    if cfg!(feature = "sound") && method == Reduction::Pca {
+        budget + dim
+    } else {
+        budget
     }
 }
 
