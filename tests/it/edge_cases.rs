@@ -90,3 +90,40 @@ fn order_of_a_zero_dimensional_zonotope_panics() {
 fn nan_point_panics() {
     let _ = Interval::point(f64::NAN);
 }
+
+/// The 1-D set `α^d`, for splitting at the exponent limit.
+fn power(d: u32) -> SparsePolyZonotope {
+    SparsePolyZonotope::new(
+        DVector::zeros(1),
+        DMatrix::from_element(1, 1, 1.0),
+        DMatrix::zeros(1, 0),
+        DMatrix::from_element(1, 1, d),
+        FactorId::fresh_n(1),
+    )
+    .expect("consistent shapes")
+}
+
+/// Exponent 56 is the largest whose binomial coefficients are exact; both halves
+/// of `α^56` evaluate to `((α' ∓ 1) / 2)^56`.
+#[test]
+fn split_accepts_the_largest_exact_exponent() {
+    let pz = power(56);
+    let (lower, upper) = pz.split(pz.ids()[0]);
+    for (half, sign) in [(&lower, -1.0f64), (&upper, 1.0)] {
+        let beta = vec![0.0; half.independent_generators().ncols()];
+        let got = half.evaluate(&[0.5], &beta)[0];
+        let want = f64::midpoint(0.5, sign).powi(56);
+        assert!(
+            (got - want).abs() <= 1e-12 * want.abs().max(f64::MIN_POSITIVE),
+            "{got} vs {want}"
+        );
+    }
+}
+
+/// Beyond exponent 56 the rescaling would round, so `split` refuses.
+#[test]
+#[should_panic(expected = "split needs exponents of at most 56")]
+fn split_rejects_inexact_exponents() {
+    let pz = power(57);
+    let _ = pz.split(pz.ids()[0]);
+}

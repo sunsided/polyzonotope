@@ -33,6 +33,13 @@ needs before it can be merged.
 | `task bench` | criterion benchmarks (`task bench -- --quick` for a fast run) |
 | `task clean` | Remove build output and coverage reports |
 
+## The `sound` feature and `target-cpu`
+
+`.cargo/config.toml` builds every x86-64 target in this repository with `-C target-cpu=haswell`,
+because inari (behind the `sound` feature) needs AVX2 and FMA, and `task ci` builds with
+`--all-features`. Plain builds get the flag too. On a pre-Haswell x86-64 machine, override it
+with `RUSTFLAGS="-C target-cpu=native"` and skip the `--all-features` tasks.
+
 ## Code style
 
 - Every item has a doc comment, private items included.

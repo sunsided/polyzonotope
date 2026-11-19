@@ -151,7 +151,9 @@ proptest! {
 
             // The original generators keep their positions; `sound` may append error bounds after them.
             let q_compacted = compacted.independent_generators().ncols();
-            prop_assert!(q <= q_compacted);
+            // Plain mode adds nothing; sound mode one error generator per dimension at most.
+            let growth = if cfg!(feature = "sound") { pz.dim() } else { 0 };
+            prop_assert!(q <= q_compacted && q_compacted <= q + growth);
             prop_assert_eq!(compacted.independent_generators().columns(0, q).into_owned(), pz.independent_generators().clone());
             prop_assert!(close(
                 &compacted.evaluate_with(|k| a[&k], &pad(beta, q_compacted)),

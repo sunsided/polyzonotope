@@ -471,7 +471,7 @@ impl SparsePolyZonotope {
     /// # Panics
     ///
     /// Panics if `factor` is not one of [`ids`](Self::ids), or if it appears
-    /// with an exponent above 50, where the binomial coefficients of the
+    /// with an exponent above 56, where the binomial coefficients of the
     /// rescaling are no longer exact in `f64`.
     #[must_use]
     pub fn split(&self, factor: FactorId) -> (Self, Self) {
@@ -563,9 +563,9 @@ fn pow_by_squaring(mut x: f64, mut n: u32) -> f64 {
 }
 
 /// Largest exponent [`SparsePolyZonotope::split`] accepts: every `C(d, j)` with
-/// `d <= 50` stays below `2^53`, so [`binomial`] and the coefficients
+/// `d <= 56` stays below `2^53`, so [`binomial`] and the coefficients
 /// `C(d, j) / 2^d` of the rescaling are exact.
-const MAX_SPLIT_EXPONENT: u32 = 50;
+const MAX_SPLIT_EXPONENT: u32 = 56;
 
 /// Binomial coefficient `C(n, k)` for `k <= n`, exact for `n <=` [`MAX_SPLIT_EXPONENT`].
 ///

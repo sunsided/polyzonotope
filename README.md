@@ -99,9 +99,9 @@ By default, arithmetic is plain `f64`. An enclosure can then miss a point by a f
 
 - `interval_hull` and `Interval` addition round their bounds outward, and `Zonotope::from_box` rounds its half widths up.
 - Every operation listed as exact computes its new coefficients in interval arithmetic. It stores their midpoints and adds one axis-aligned generator for each dimension whose rounding error is nonzero: an independent generator for a `SparsePolyZonotope`, a plain generator for a `Zonotope`. The result then encloses the set real arithmetic would give.
-- Every coefficient must be finite. A NaN or an infinity panics.
+- Every coefficient must be finite. This is a precondition, not a check: a NaN or an infinity panics once the arithmetic touches it, but coefficients an operation only copies pass through unchecked.
 
-So under `sound`, the number of independent generators (and of `β` values that positional `evaluate` expects) can grow after any exact operation. Cargo unifies features across the dependency graph, so read the count from `independent_generators().ncols()` instead of assuming it. The error generators pile up over long chains of operations. Order reduction (on the roadmap) merges them again.
+So under `sound`, the number of generators can grow after any exact operation, and so can the number of `β` values that positional `evaluate` expects. That is up to `2 · dim` per call, since `exact_plus` and `split` append one batch and their internal `compact` may append another. Cargo unifies features across the dependency graph, so read the count instead of assuming it: `independent_generators().ncols()` on a `SparsePolyZonotope`, `num_generators()` on a `Zonotope`. The error generators pile up over long chains of operations. Order reduction (on the roadmap) merges them again.
 
 ```toml
 polyzonotope = { version = "0.2", features = ["sound"] }
