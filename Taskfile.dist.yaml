@@ -190,6 +190,7 @@ tasks:
       - task: test
       - task: deny
       - task: msrv
+      - task: semver
 
   clean:
     desc: Remove build output and coverage reports
