@@ -7,6 +7,8 @@ license = "MIT OR Apache-2.0"
 rust-version = "1.89"
 repository = "https://github.com/sunsided/polyzonotope"
 readme = "README.md"
+keywords = ["zonotope", "polynomial-zonotope", "reachability", "set-based", "verification"]
+categories = ["mathematics", "science", "algorithms"]
 
 [package.metadata.docs.rs]
 all-features = true

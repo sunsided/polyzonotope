@@ -1,5 +1,13 @@
 # polyzonotope
 
+[![crates.io](https://img.shields.io/crates/v/polyzonotope.svg)](https://crates.io/crates/polyzonotope)
+[![docs.rs](https://img.shields.io/docsrs/polyzonotope)](https://docs.rs/polyzonotope)
+[![CI](https://github.com/sunsided/polyzonotope/actions/workflows/ci.yml/badge.svg)](https://github.com/sunsided/polyzonotope/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/sunsided/polyzonotope/graph/badge.svg)](https://codecov.io/gh/sunsided/polyzonotope)
+[![MSRV](https://img.shields.io/crates/msrv/polyzonotope)](https://crates.io/crates/polyzonotope)
+[![License](https://img.shields.io/crates/l/polyzonotope)](https://github.com/sunsided/polyzonotope#license)
+[![unsafe forbidden](https://img.shields.io/badge/unsafe-forbidden-success.svg)](https://github.com/rust-secure-code/safety-dance/)
+
 Sparse polynomial zonotopes (Kochdumper & Althoff, IEEE TAC 2021), zonotopes, and interval boxes, for set-based reachability analysis.
 
 ```text
