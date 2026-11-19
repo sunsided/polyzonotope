@@ -7,3 +7,6 @@ license = "MIT OR Apache-2.0"
 rust-version = "1.85"
 repository = "https://github.com/sunsided/polyzonotope"
 readme = "README.md"
+
+[dependencies]
+nalgebra = "0.33"
