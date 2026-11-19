@@ -87,6 +87,17 @@ enum MonomialRange {
     Symmetric,
 }
 
+impl MonomialRange {
+    /// The range of `g · m` as the monomial `m` ranges over this range.
+    fn scaled_bounds(&self, g: f64) -> Interval {
+        match self {
+            Self::Constant => Interval::point(g),
+            Self::UnitRange => Interval::new(g.min(0.0), g.max(0.0)),
+            Self::Symmetric => Interval::new(-g.abs(), g.abs()),
+        }
+    }
+}
+
 impl SparsePolyZonotope {
     /// The set `⟨c, g, gi, e, id⟩`, after checking that the shapes fit together.
     ///
@@ -108,12 +119,15 @@ impl SparsePolyZonotope {
         if g.nrows() != n {
             return Err(ShapeError::GeneratorRows);
         }
+
         if gi.nrows() != n {
             return Err(ShapeError::IndependentRows);
         }
+
         if e.ncols() != g.ncols() {
             return Err(ShapeError::ExponentColumns);
         }
+
         if e.nrows() != id.len() {
             return Err(ShapeError::ExponentRows);
         }
@@ -123,6 +137,7 @@ impl SparsePolyZonotope {
         if sorted.windows(2).any(|w| w[0] == w[1]) {
             return Err(ShapeError::DuplicateId);
         }
+
         Ok(Self { c, g, gi, e, id })
     }
 
@@ -330,6 +345,7 @@ impl SparsePolyZonotope {
                 columns.push((exp, gv));
             }
         }
+
         columns.retain(|(_, g)| g.iter().any(|&x| x != 0.0));
         let used: Vec<usize> = (0..self.id.len())
             .filter(|&k| columns.iter().any(|(e, _)| e[k] != 0))
@@ -368,18 +384,15 @@ impl SparsePolyZonotope {
         for j in 0..self.g.ncols() {
             let range = self.monomial_range(j);
             for (i, &g) in self.g.column(j).iter().enumerate() {
-                let (lo, hi) = match range {
-                    MonomialRange::Constant => (g, g),
-                    MonomialRange::UnitRange => (g.min(0.0), g.max(0.0)),
-                    MonomialRange::Symmetric => (-g.abs(), g.abs()),
-                };
-                iv[i] = iv[i] + Interval::new(lo, hi);
+                iv[i] = iv[i] + range.scaled_bounds(g);
             }
         }
+
         for (i, row) in self.gi.row_iter().enumerate() {
             let r: f64 = row.iter().map(|x| x.abs()).sum();
             iv[i] = iv[i] + Interval::new(-r, r);
         }
+
         IntervalBox(iv)
     }
 
@@ -400,6 +413,7 @@ impl SparsePolyZonotope {
                 MonomialRange::Symmetric => gens.push(g),
             }
         }
+
         gens.extend(self.gi.column_iter().map(nalgebra::Matrix::into_owned));
         let n = self.dim();
         Zonotope::new(c, DMatrix::from_fn(n, gens.len(), |i, j| gens[j][i]))
@@ -494,6 +508,7 @@ fn merge_ids(
             id.len() - 1
         });
     }
+
     let p = id.len();
     let e1 = DMatrix::from_fn(p, a.e.ncols(), |r, c| {
         if r < a.e.nrows() { a.e[(r, c)] } else { 0 }
@@ -504,5 +519,6 @@ fn merge_ids(
             e2[(pos[k], c)] = b.e[(r, c)];
         }
     }
+
     (id, e1, e2)
 }
