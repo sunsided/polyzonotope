@@ -4,12 +4,12 @@ description = "Sparse polynomial zonotopes, zonotopes and interval boxes for set
 version = "0.1.0"
 edition = "2024"
 license = "MIT OR Apache-2.0"
-rust-version = "1.85"
+rust-version = "1.89"
 repository = "https://github.com/sunsided/polyzonotope"
 readme = "README.md"
 
 [dependencies]
-nalgebra = "0.33"
+nalgebra = "0.35"
 
 [dev-dependencies]
 proptest = "1"
