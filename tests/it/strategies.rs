@@ -15,13 +15,15 @@ pub const TOL: f64 = 1e-9;
 pub const SAMPLE_LEN: usize = 8;
 
 /// Random sparse polynomial zonotope with 1–3 dimensions, up to 5 dependent
-/// and 2 independent generators, 1–3 fresh factors and exponents in `0..=3`.
+/// and 2 independent generators (some of them zero), 1–3 fresh factors and
+/// exponents in `0..=3`.
 pub fn arb_pz() -> impl Strategy<Value = SparsePolyZonotope> {
     (1usize..=3, 0usize..=5, 0usize..=2, 1usize..=3).prop_flat_map(|(n, h, q, p)| {
         (
             vec(-5.0..5.0f64, n),
             vec(-2.0..2.0f64, n * h),
-            vec(-2.0..2.0f64, n * q),
+            // Exact zeros make whole zero columns likely, exercising compact()'s column dropping.
+            vec(prop_oneof![1 => Just(0.0), 3 => -2.0..2.0f64], n * q),
             vec(0u32..=3, p * h),
         )
             .prop_map(move |(c, g, gi, e)| {

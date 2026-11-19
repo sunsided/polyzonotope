@@ -158,7 +158,9 @@ proptest! {
                 let value = |id: FactorId| if Some(id) == new_id { t } else { a[&id] };
                 let orig = |id: FactorId| if id == k { f64::midpoint(t, sign) } else { a[&id] };
                 let beta = &s.beta[..q];
-                prop_assert!(close(&half.evaluate_with(value, &beta[..half.independent_generators().ncols()]), &pz.evaluate_with(orig, beta)));
+                // split() compacts, which drops zero independent generators; keep the surviving β's.
+                let half_beta = surviving_betas(&[&pz], beta);
+                prop_assert!(close(&half.evaluate_with(value, &half_beta), &pz.evaluate_with(orig, beta)));
             }
         }
     }
