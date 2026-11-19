@@ -8,9 +8,9 @@ use crate::{Interval, IntervalBox, hcat};
 #[derive(Clone, Debug, PartialEq)]
 pub struct Zonotope {
     /// Center `c`; its length is the dimension of the set.
-    pub center: DVector<f64>,
-    /// `dim × m` generator matrix.
-    pub generators: DMatrix<f64>,
+    center: DVector<f64>,
+    /// `dim × m` generator matrix; one row per entry of [`center`](Self::center).
+    generators: DMatrix<f64>,
 }
 
 impl Zonotope {
@@ -41,6 +41,18 @@ impl Zonotope {
         Self::new(c, g)
     }
 
+    /// Center `c`.
+    #[must_use]
+    pub fn center(&self) -> &DVector<f64> {
+        &self.center
+    }
+
+    /// Generator matrix `G`, one generator per column and one row per dimension.
+    #[must_use]
+    pub fn generators(&self) -> &DMatrix<f64> {
+        &self.generators
+    }
+
     /// Dimension of the space the set lives in.
     #[must_use]
     pub fn dim(&self) -> usize {
@@ -54,12 +66,17 @@ impl Zonotope {
     }
 
     /// `m / n`, the usual measure of representation size.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the set is zero-dimensional, where the order is undefined.
     #[must_use]
     #[expect(
         clippy::cast_precision_loss,
         reason = "generator counts and dimensions stay far below 2^52"
     )]
     pub fn order(&self) -> f64 {
+        assert!(self.dim() > 0, "order of a zero-dimensional zonotope");
         self.num_generators() as f64 / self.dim() as f64
     }
 

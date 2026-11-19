@@ -87,6 +87,28 @@ proptest! {
         }
     }
 
+    /// Converting a zonotope turns each generator into its own factor, so
+    /// the coefficients of the zonotope serve as the α values unchanged.
+    #[test]
+    fn from_zonotope_is_exact(pz in arb_pz(), samples in arb_samples()) {
+        let z = pz.to_zonotope();
+        let converted = SparsePolyZonotope::from_zonotope(&z);
+        for s in &samples {
+            // Cyclic, so the coefficient count is not bounded by the sample length.
+            let coeffs: Vec<f64> = (0..z.num_generators()).map(|j| s.beta[j % s.beta.len()]).collect();
+            prop_assert!(close(&converted.evaluate(&coeffs, &[]), &z.evaluate(&coeffs)));
+        }
+    }
+
+    /// Positional evaluation agrees with evaluation by id.
+    #[test]
+    fn evaluate_matches_evaluate_with(pz in arb_pz(), samples in arb_samples()) {
+        let (p, q) = (pz.ids().len(), pz.independent_generators().ncols());
+        for s in &samples {
+            prop_assert!(close(&pz.evaluate(&s.alpha[..p], &s.beta[..q]), &eval(&pz, s)));
+        }
+    }
+
     /// Compacting changes the representation, not the function of α and β.
     #[test]
     fn compact_preserves_the_function(pz in arb_pz(), samples in arb_samples()) {
@@ -95,10 +117,10 @@ proptest! {
             // compact() keeps the relative order of ids, so look values up by id.
             let a = alpha_map(pz.ids(), s);
             let q = pz.independent_generators().ncols();
-            let beta = surviving_betas(&[&pz], &s.beta[..q]);
+            let beta = &s.beta[..q];
 
-            prop_assert_eq!(beta.len(), compacted.independent_generators().ncols());
-            prop_assert!(close(&compacted.evaluate_with(|k| a[&k], &beta), &pz.evaluate_with(|k| a[&k], &s.beta[..q])));
+            prop_assert_eq!(q, compacted.independent_generators().ncols());
+            prop_assert!(close(&compacted.evaluate_with(|k| a[&k], beta), &pz.evaluate_with(|k| a[&k], beta)));
         }
     }
 
@@ -117,8 +139,29 @@ proptest! {
 
             // Independent generators are concatenated, so feed the same β twice.
             let twice: Vec<f64> = beta.iter().chain(beta).copied().collect();
-            let beta2 = surviving_betas(&[&pz, &other], &twice);
-            prop_assert!(close(&sum.evaluate_with(|k| a[&k], &beta2), &expected));
+            prop_assert!(close(&sum.evaluate_with(|k| a[&k], &twice), &expected));
+        }
+    }
+
+    /// The Minkowski sum of a set with itself decorrelates the two copies:
+    /// `(p ⊕ p)(α₁, α₂) = p(α₁) + p(α₂)` for independent `α₁`, `α₂`.
+    #[test]
+    fn minkowski_sum_decorrelates_the_operands(pz in arb_pz(), s1 in arb_samples(), s2 in arb_samples()) {
+        let sum = pz.minkowski_sum(&pz);
+        // The second copy got fresh ids; compaction keeps the same factors of both copies, in order.
+        let (old, new): (Vec<FactorId>, Vec<FactorId>) =
+            sum.ids().iter().copied().partition(|id| pz.ids().contains(id));
+        prop_assert_eq!(old.len(), new.len());
+
+        let q = pz.independent_generators().ncols();
+        for (s1, s2) in s1.iter().zip(&s2) {
+            let (a1, a2) = (alpha_map(pz.ids(), s1), alpha_map(pz.ids(), s2));
+            let value = |id: FactorId| match new.iter().position(|&n| n == id) {
+                Some(j) => a2[&old[j]],
+                None => a1[&id],
+            };
+            let beta: Vec<f64> = s1.beta[..q].iter().chain(&s2.beta[..q]).copied().collect();
+            prop_assert!(close(&sum.evaluate_with(value, &beta), &(eval(&pz, s1) + eval(&pz, s2))));
         }
     }
 
@@ -158,9 +201,7 @@ proptest! {
                 let value = |id: FactorId| if Some(id) == new_id { t } else { a[&id] };
                 let orig = |id: FactorId| if id == k { f64::midpoint(t, sign) } else { a[&id] };
                 let beta = &s.beta[..q];
-                // split() compacts, which drops zero independent generators; keep the surviving β's.
-                let half_beta = surviving_betas(&[&pz], beta);
-                prop_assert!(close(&half.evaluate_with(value, &half_beta), &pz.evaluate_with(orig, beta)));
+                prop_assert!(close(&half.evaluate_with(value, beta), &pz.evaluate_with(orig, beta)));
             }
         }
     }
@@ -170,14 +211,15 @@ proptest! {
 ///
 /// Mirrors the generator order of [`SparsePolyZonotope::to_zonotope`]: constant
 /// monomials fold into the center, even monomials `m ∈ [0, 1]` become `2m - 1`,
-/// the rest keep `m`, and the independent factors follow.
+/// the rest keep `m`, the independent factors follow, and the coefficients of
+/// all-zero generators are left out along with their generators.
 fn zonotope_coefficients(pz: &SparsePolyZonotope, s: &Sample) -> Vec<f64> {
     let (e, ids) = (pz.exponents(), pz.ids());
     let a = alpha_map(ids, s);
     let mut coeffs = Vec::new();
-    for col in e.column_iter() {
+    for (col, g) in e.column_iter().zip(pz.dependent_generators().column_iter()) {
         let m = monomial(col.iter().copied(), ids, &a);
-        if col.iter().all(|&x| x == 0) {
+        if col.iter().all(|&x| x == 0) || is_zero(g.iter()) {
             continue;
         }
 
@@ -185,8 +227,24 @@ fn zonotope_coefficients(pz: &SparsePolyZonotope, s: &Sample) -> Vec<f64> {
         coeffs.push(if even { 2.0 * m - 1.0 } else { m });
     }
 
-    coeffs.extend_from_slice(&s.beta[..pz.independent_generators().ncols()]);
+    let q = pz.independent_generators().ncols();
+    assert!(
+        s.beta.len() >= q,
+        "sample holds {} β values for {q} independent generators",
+        s.beta.len()
+    );
+    let independent = pz.independent_generators().column_iter().zip(&s.beta);
+    coeffs.extend(
+        independent
+            .filter(|(g, _)| !is_zero(g.iter()))
+            .map(|(_, &b)| b),
+    );
     coeffs
+}
+
+/// Whether every entry of a generator column is exactly zero.
+fn is_zero<'a>(mut column: impl Iterator<Item = &'a f64>) -> bool {
+    column.all(|&x| x == 0.0)
 }
 
 /// The monomial `Π_k α_k^exponents[k]` at the factor values `alpha`.
@@ -199,17 +257,4 @@ fn monomial(
         .zip(ids)
         .map(|(x, k)| alpha[k].powi(i32::try_from(x).expect("exponents are small")))
         .product()
-}
-
-/// The β's of the nonzero independent generators of `sets`, concatenated in order.
-///
-/// `compact` (and `exact_plus`, which compacts) drops zero independent
-/// generators, so only the β's of the surviving columns are kept.
-fn surviving_betas(sets: &[&SparsePolyZonotope], beta: &[f64]) -> Vec<f64> {
-    sets.iter()
-        .flat_map(|pz| pz.independent_generators().column_iter())
-        .zip(beta)
-        .filter(|(col, _)| col.iter().any(|&x| x != 0.0))
-        .map(|(_, &x)| x)
-        .collect()
 }

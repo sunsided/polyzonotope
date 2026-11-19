@@ -6,7 +6,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use nalgebra::{DMatrix, DVector};
 
-use crate::{Interval, IntervalBox, Zonotope, hcat};
+use crate::{Interval, IntervalBox, Zonotope, from_column_list, hcat};
 
 /// Global identifier of a dependent factor `α_k`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -146,8 +146,8 @@ impl SparsePolyZonotope {
     pub fn from_zonotope(z: &Zonotope) -> Self {
         let m = z.num_generators();
         Self {
-            c: z.center.clone(),
-            g: z.generators.clone(),
+            c: z.center().clone(),
+            g: z.generators().clone(),
             gi: DMatrix::zeros(z.dim(), 0),
             e: DMatrix::identity(m, m),
             id: FactorId::fresh_n(m),
@@ -206,9 +206,18 @@ impl SparsePolyZonotope {
         );
 
         let a: Vec<f64> = self.id.iter().map(|&k| alpha(k)).collect();
+
+        self.evaluate_positional(&a, beta)
+    }
+
+    /// Point of the set for positional factor values: `a[k]` belongs to `ids()[k]`.
+    ///
+    /// Callers check that `a` has one entry per id and `beta` one entry per
+    /// independent generator.
+    fn evaluate_positional(&self, a: &[f64], beta: &[f64]) -> DVector<f64> {
         let mut p = &self.c + &self.gi * DVector::from_column_slice(beta);
         for i in 0..self.g.ncols() {
-            p += self.g.column(i) * self.monomial_value(i, &a);
+            p += self.g.column(i) * self.monomial_value(i, a);
         }
 
         p
@@ -231,10 +240,13 @@ impl SparsePolyZonotope {
     #[must_use]
     pub fn evaluate(&self, alpha: &[f64], beta: &[f64]) -> DVector<f64> {
         assert_eq!(alpha.len(), self.id.len(), "one α per factor");
+        assert_eq!(
+            beta.len(),
+            self.gi.ncols(),
+            "one β per independent generator"
+        );
 
-        let pos: HashMap<FactorId, usize> =
-            self.id.iter().enumerate().map(|(i, &k)| (k, i)).collect();
-        self.evaluate_with(|k| alpha[pos[&k]], beta)
+        self.evaluate_positional(alpha, beta)
     }
 
     /// Exact: `{ M x | x ∈ PZ }`.
@@ -248,7 +260,8 @@ impl SparsePolyZonotope {
             c: m * &self.c,
             g: m * &self.g,
             gi: m * &self.gi,
-            ..self.clone()
+            e: self.e.clone(),
+            id: self.id.clone(),
         }
     }
 
@@ -261,7 +274,10 @@ impl SparsePolyZonotope {
     pub fn translate(&self, v: &DVector<f64>) -> Self {
         Self {
             c: &self.c + v,
-            ..self.clone()
+            g: self.g.clone(),
+            gi: self.gi.clone(),
+            e: self.e.clone(),
+            id: self.id.clone(),
         }
     }
 
@@ -303,6 +319,8 @@ impl SparsePolyZonotope {
     }
 
     /// Exact Cartesian product, keeping shared factors correlated.
+    ///
+    /// The result is [`compact`](Self::compact)ed, like [`exact_plus`](Self::exact_plus).
     #[must_use]
     pub fn cartesian_product(&self, other: &Self) -> Self {
         let (id, e1, e2) = merge_ids(self, other);
@@ -323,10 +341,18 @@ impl SparsePolyZonotope {
             e: hcat(&e1, &e2),
             id,
         }
+        .compact()
     }
 
     /// Merges generators with identical exponent columns, moves constant
-    /// monomials into the center, and drops zero generators and unused factors.
+    /// monomials into the center, and drops zero dependent generators and
+    /// unused factors.
+    ///
+    /// Independent generators are kept as they are, even zero ones, so the
+    /// positions of the `β` values stay stable across [`exact_plus`](Self::exact_plus)
+    /// and [`split`](Self::split). The price is that zero independent
+    /// generators, e.g. from a singular [`linear_map`](Self::linear_map), are
+    /// never reclaimed here; [`to_zonotope`](Self::to_zonotope) leaves them out.
     #[must_use]
     pub fn compact(&self) -> Self {
         let n = self.dim();
@@ -350,15 +376,10 @@ impl SparsePolyZonotope {
         let used: Vec<usize> = (0..self.id.len())
             .filter(|&k| columns.iter().any(|(e, _)| e[k] != 0))
             .collect();
-        let gi_cols: Vec<_> = self
-            .gi
-            .column_iter()
-            .filter(|col| col.iter().any(|&x| x != 0.0))
-            .collect();
         Self {
             c,
             g: DMatrix::from_fn(n, columns.len(), |i, j| columns[j].1[i]),
-            gi: DMatrix::from_fn(n, gi_cols.len(), |i, j| gi_cols[j][i]),
+            gi: self.gi.clone(),
             e: DMatrix::from_fn(used.len(), columns.len(), |k, j| columns[j].0[used[k]]),
             id: used.iter().map(|&k| self.id[k]).collect(),
         }
@@ -398,6 +419,9 @@ impl SparsePolyZonotope {
 
     /// Zonotope enclosure: monomials with only even exponents range over
     /// `[0, 1]`, so they contribute `g/2 + (g/2)·β`.
+    ///
+    /// All-zero generators, dependent or independent, are left out, so
+    /// [`Zonotope::order`] counts only generators that shape the set.
     #[must_use]
     pub fn to_zonotope(&self) -> Zonotope {
         let mut c = self.c.clone();
@@ -415,8 +439,9 @@ impl SparsePolyZonotope {
         }
 
         gens.extend(self.gi.column_iter().map(nalgebra::Matrix::into_owned));
+        gens.retain(|g| g.iter().any(|&x| x != 0.0));
         let n = self.dim();
-        Zonotope::new(c, DMatrix::from_fn(n, gens.len(), |i, j| gens[j][i]))
+        Zonotope::new(c, from_column_list(n, &gens))
     }
 
     /// Splits the domain of `factor` into `[-1, 0]` and `[0, 1]`. Each half
@@ -455,9 +480,9 @@ impl SparsePolyZonotope {
 
         Self {
             c: self.c.clone(),
-            g: DMatrix::from_fn(n, gens.len(), |r, c| gens[c][r]),
+            g: from_column_list(n, &gens),
             gi: self.gi.clone(),
-            e: DMatrix::from_fn(p, exps.len(), |r, c| exps[c][r]),
+            e: from_column_list(p, &exps),
             id,
         }
         .compact()
