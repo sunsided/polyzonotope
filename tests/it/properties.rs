@@ -95,10 +95,10 @@ proptest! {
             // compact() keeps the relative order of ids, so look values up by id.
             let a = alpha_map(pz.ids(), s);
             let q = pz.independent_generators().ncols();
-            let beta = surviving_betas(&[&pz], &s.beta[..q]);
+            let beta = &s.beta[..q];
 
-            prop_assert_eq!(beta.len(), compacted.independent_generators().ncols());
-            prop_assert!(close(&compacted.evaluate_with(|k| a[&k], &beta), &pz.evaluate_with(|k| a[&k], &s.beta[..q])));
+            prop_assert_eq!(q, compacted.independent_generators().ncols());
+            prop_assert!(close(&compacted.evaluate_with(|k| a[&k], beta), &pz.evaluate_with(|k| a[&k], beta)));
         }
     }
 
@@ -117,8 +117,7 @@ proptest! {
 
             // Independent generators are concatenated, so feed the same β twice.
             let twice: Vec<f64> = beta.iter().chain(beta).copied().collect();
-            let beta2 = surviving_betas(&[&pz, &other], &twice);
-            prop_assert!(close(&sum.evaluate_with(|k| a[&k], &beta2), &expected));
+            prop_assert!(close(&sum.evaluate_with(|k| a[&k], &twice), &expected));
         }
     }
 
@@ -158,9 +157,7 @@ proptest! {
                 let value = |id: FactorId| if Some(id) == new_id { t } else { a[&id] };
                 let orig = |id: FactorId| if id == k { f64::midpoint(t, sign) } else { a[&id] };
                 let beta = &s.beta[..q];
-                // split() compacts, which drops zero independent generators; keep the surviving β's.
-                let half_beta = surviving_betas(&[&pz], beta);
-                prop_assert!(close(&half.evaluate_with(value, &half_beta), &pz.evaluate_with(orig, beta)));
+                prop_assert!(close(&half.evaluate_with(value, beta), &pz.evaluate_with(orig, beta)));
             }
         }
     }
@@ -199,17 +196,4 @@ fn monomial(
         .zip(ids)
         .map(|(x, k)| alpha[k].powi(i32::try_from(x).expect("exponents are small")))
         .product()
-}
-
-/// The β's of the nonzero independent generators of `sets`, concatenated in order.
-///
-/// `compact` (and `exact_plus`, which compacts) drops zero independent
-/// generators, so only the β's of the surviving columns are kept.
-fn surviving_betas(sets: &[&SparsePolyZonotope], beta: &[f64]) -> Vec<f64> {
-    sets.iter()
-        .flat_map(|pz| pz.independent_generators().column_iter())
-        .zip(beta)
-        .filter(|(col, _)| col.iter().any(|&x| x != 0.0))
-        .map(|(_, &x)| x)
-        .collect()
 }

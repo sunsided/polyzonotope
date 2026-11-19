@@ -22,7 +22,7 @@ pub fn arb_pz() -> impl Strategy<Value = SparsePolyZonotope> {
         (
             vec(-5.0..5.0f64, n),
             vec(-2.0..2.0f64, n * h),
-            // Exact zeros make whole zero columns likely, exercising compact()'s column dropping.
+            // Exact zeros make whole zero columns likely: compact() must keep them so β positions stay stable.
             vec(prop_oneof![1 => Just(0.0), 3 => -2.0..2.0f64], n * q),
             vec(0u32..=3, p * h),
         )

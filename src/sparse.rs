@@ -303,6 +303,8 @@ impl SparsePolyZonotope {
     }
 
     /// Exact Cartesian product, keeping shared factors correlated.
+    ///
+    /// The result is [`compact`](Self::compact)ed, like [`exact_plus`](Self::exact_plus).
     #[must_use]
     pub fn cartesian_product(&self, other: &Self) -> Self {
         let (id, e1, e2) = merge_ids(self, other);
@@ -323,10 +325,16 @@ impl SparsePolyZonotope {
             e: hcat(&e1, &e2),
             id,
         }
+        .compact()
     }
 
     /// Merges generators with identical exponent columns, moves constant
-    /// monomials into the center, and drops zero generators and unused factors.
+    /// monomials into the center, and drops zero dependent generators and
+    /// unused factors.
+    ///
+    /// Independent generators are kept as they are, even zero ones, so the
+    /// positions of the `β` values stay stable across [`exact_plus`](Self::exact_plus)
+    /// and [`split`](Self::split).
     #[must_use]
     pub fn compact(&self) -> Self {
         let n = self.dim();
@@ -350,15 +358,10 @@ impl SparsePolyZonotope {
         let used: Vec<usize> = (0..self.id.len())
             .filter(|&k| columns.iter().any(|(e, _)| e[k] != 0))
             .collect();
-        let gi_cols: Vec<_> = self
-            .gi
-            .column_iter()
-            .filter(|col| col.iter().any(|&x| x != 0.0))
-            .collect();
         Self {
             c,
             g: DMatrix::from_fn(n, columns.len(), |i, j| columns[j].1[i]),
-            gi: DMatrix::from_fn(n, gi_cols.len(), |i, j| gi_cols[j][i]),
+            gi: self.gi.clone(),
             e: DMatrix::from_fn(used.len(), columns.len(), |k, j| columns[j].0[used[k]]),
             id: used.iter().map(|&k| self.id[k]).collect(),
         }
