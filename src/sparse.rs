@@ -568,3 +568,37 @@ fn merge_ids(
 
     (id, e1, e2)
 }
+
+/// Unit tests for the private power helpers, which the integration tests only
+/// reach through the `std` path.
+#[cfg(test)]
+mod tests {
+    use super::{pow_by_squaring, powu};
+
+    /// `x^n` as `n` plain multiplications, the reference both helpers must match.
+    fn naive_pow(x: f64, n: u32) -> f64 {
+        (0..n).fold(1.0, |acc, _| acc * x)
+    }
+
+    /// Repeated squaring agrees with plain multiplication, including `x^0 = 1` for `x = 0`.
+    #[test]
+    fn pow_by_squaring_matches_repeated_multiplication() {
+        for x in [0.0, 1.0, -1.0, 0.5, -1.5, 0.3] {
+            for n in 0..=40 {
+                let (got, want) = (pow_by_squaring(x, n), naive_pow(x, n));
+                assert!(
+                    (got - want).abs() <= 1e-12 * want.abs(),
+                    "{x}^{n}: {got} vs {want}"
+                );
+            }
+        }
+    }
+
+    /// Exponents beyond `i32::MAX` take the repeated-squaring path instead of panicking.
+    #[test]
+    fn powu_handles_exponents_beyond_i32_max() {
+        assert!((powu(1.0, u32::MAX) - 1.0).abs() < f64::EPSILON);
+        assert!((powu(-1.0, u32::MAX) + 1.0).abs() < f64::EPSILON);
+        assert!(powu(0.5, u32::MAX).abs() < f64::EPSILON);
+    }
+}
