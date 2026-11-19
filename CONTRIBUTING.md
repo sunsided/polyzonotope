@@ -56,9 +56,10 @@ This repository uses **GitHub Flow**:
 - Open a PR into `main`.
 
 No other prefixes (`fix/`, `chore/`, `deps/`, ...). `task lint:branch`, the pre-push hook and
-CI check the branch name. Bot branches (`release/*` from release-plz, `dependabot/*`) are the
-only exceptions. Copilot's `copilot/*` branches are renamed to `feature/*` before anyone
-works on them.
+CI check the branch name (`scripts/check-branch.sh` is the single definition). Besides
+`feature/*`, it accepts `hotfix/*` for urgent fixes cut for a release, and the bot branches
+`release/*` (release-plz) and `dependabot/*`. Copilot's `copilot/*` branches pass with a
+warning only so its PRs are not blocked; rename them to `feature/*` before working on them.
 
 ## Commits and pull requests
 
