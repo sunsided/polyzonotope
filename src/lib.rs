@@ -1,5 +1,10 @@
 #![doc = include_str!("../README.md")]
+#![no_std]
 #![forbid(unsafe_code)]
+
+extern crate alloc;
+#[cfg(feature = "std")]
+extern crate std;
 
 mod interval;
 mod sparse;
@@ -9,7 +14,7 @@ pub use interval::{Interval, IntervalBox};
 pub use sparse::{FactorId, ShapeError, SparsePolyZonotope};
 pub use zonotope::Zonotope;
 
-use std::ops::Index;
+use core::ops::Index;
 
 use nalgebra::DMatrix;
 

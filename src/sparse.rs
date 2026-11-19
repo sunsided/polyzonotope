@@ -1,8 +1,9 @@
 //! Sparse polynomial zonotopes (Kochdumper & Althoff, IEEE TAC 2021).
 
-use std::collections::HashMap;
-use std::fmt;
-use std::sync::atomic::{AtomicU64, Ordering};
+use alloc::collections::BTreeMap;
+use alloc::vec::Vec;
+use core::fmt;
+use portable_atomic::{AtomicU64, Ordering};
 
 use nalgebra::{DMatrix, DVector};
 
@@ -13,6 +14,9 @@ use crate::{Interval, IntervalBox, Zonotope, from_column_list, hcat};
 pub struct FactorId(u64);
 
 /// Next unused [`FactorId`] value; shared process-wide so ids never collide.
+///
+/// `portable_atomic` rather than `core`, so targets without native 64-bit
+/// atomics (Cortex-M, 32-bit RISC-V) still get a shared counter.
 static NEXT_FACTOR: AtomicU64 = AtomicU64::new(0);
 
 impl FactorId {
@@ -56,7 +60,7 @@ impl fmt::Display for ShapeError {
     }
 }
 
-impl std::error::Error for ShapeError {}
+impl core::error::Error for ShapeError {}
 
 /// Sparse polynomial zonotope `⟨c, G, GI, E, id⟩`.
 #[derive(Clone, Debug, PartialEq)]
@@ -195,8 +199,7 @@ impl SparsePolyZonotope {
     ///
     /// # Panics
     ///
-    /// Panics if `beta` does not have one entry per independent generator,
-    /// or if an exponent exceeds `i32::MAX`.
+    /// Panics if `beta` does not have one entry per independent generator.
     #[must_use]
     pub fn evaluate_with(&self, alpha: impl Fn(FactorId) -> f64, beta: &[f64]) -> DVector<f64> {
         assert_eq!(
@@ -227,7 +230,7 @@ impl SparsePolyZonotope {
     fn monomial_value(&self, i: usize, a: &[f64]) -> f64 {
         a.iter()
             .zip(self.e.column(i).iter())
-            .map(|(&x, &d)| x.powi(exponent(d)))
+            .map(|(&x, &d)| powu(x, d))
             .product()
     }
 
@@ -358,7 +361,7 @@ impl SparsePolyZonotope {
         let n = self.dim();
         let mut c = self.c.clone();
         let mut columns: Vec<(Vec<u32>, DVector<f64>)> = Vec::new();
-        let mut index: HashMap<Vec<u32>, usize> = HashMap::new();
+        let mut index: BTreeMap<Vec<u32>, usize> = BTreeMap::new();
         for i in 0..self.g.ncols() {
             let exp: Vec<u32> = self.e.column(i).iter().copied().collect();
             let gv = self.g.column(i).into_owned();
@@ -497,7 +500,7 @@ impl SparsePolyZonotope {
 
         (0..=d)
             .map(|j| {
-                let coef = binomial(d, j) * 0.5f64.powi(exponent(d)) * sign.powi(exponent(d - j));
+                let coef = binomial(d, j) * powu(0.5, d) * powu(sign, d - j);
                 let mut exp: Vec<u32> = self.e.column(i).iter().copied().collect();
                 exp[k] = j;
                 (exp, coef)
@@ -506,13 +509,31 @@ impl SparsePolyZonotope {
     }
 }
 
-/// `x` as an `i32` power for [`f64::powi`].
+/// `x^n`, via [`f64::powi`] with the `std` feature and repeated squaring without it.
 ///
-/// # Panics
-///
-/// Panics if `x` exceeds `i32::MAX`; such a power over- or underflows `f64` anyway.
-fn exponent(x: u32) -> i32 {
-    i32::try_from(x).expect("exponent exceeds i32::MAX")
+/// Exponents beyond `i32::MAX` take the repeated-squaring path in both cases.
+fn powu(x: f64, n: u32) -> f64 {
+    #[cfg(feature = "std")]
+    if let Ok(n) = i32::try_from(n) {
+        return x.powi(n);
+    }
+
+    pow_by_squaring(x, n)
+}
+
+/// `x^n` by repeated squaring, in `O(log n)` multiplications; `x^0` is 1, also for `x = 0`.
+fn pow_by_squaring(mut x: f64, mut n: u32) -> f64 {
+    let mut acc = 1.0;
+    while n > 0 {
+        if n & 1 == 1 {
+            acc *= x;
+        }
+
+        x *= x;
+        n >>= 1;
+    }
+
+    acc
 }
 
 /// Binomial coefficient `C(n, k)` as `f64`, for `k <= n`.
@@ -526,7 +547,7 @@ fn merge_ids(
     b: &SparsePolyZonotope,
 ) -> (Vec<FactorId>, DMatrix<u32>, DMatrix<u32>) {
     let mut id = a.id.clone();
-    let mut pos: HashMap<FactorId, usize> = id.iter().enumerate().map(|(i, &k)| (k, i)).collect();
+    let mut pos: BTreeMap<FactorId, usize> = id.iter().enumerate().map(|(i, &k)| (k, i)).collect();
     for &k in &b.id {
         pos.entry(k).or_insert_with(|| {
             id.push(k);
