@@ -1,0 +1,9 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc bdc7cdd1951b3da81d59db3e6885975090c6f8f5fb7e24240ab01b163e569393 # shrinks to pz = SparsePolyZonotope { c: VecStorage { data: [0.5525136899206445], nrows: Dyn(1), ncols: Const }, g: VecStorage { data: [], nrows: Dyn(1), ncols: Dyn(0) }, gi: VecStorage { data: [], nrows: Dyn(1), ncols: Dyn(0) }, e: VecStorage { data: [], nrows: Dyn(1), ncols: Dyn(0) }, id: [FactorId(975)] }, m = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], samples = [Sample { alpha: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], beta: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0] }]
+cc 67aa1002a2a9e05e304c2a403ebc136df915cd8ed59c5177a8df5938b597d092 # shrinks to pz = SparsePolyZonotope { c: VecStorage { data: [-2.1699057428024933], nrows: Dyn(1), ncols: Const }, g: VecStorage { data: [], nrows: Dyn(1), ncols: Dyn(0) }, gi: VecStorage { data: [-1.3980637662501634], nrows: Dyn(1), ncols: Dyn(1) }, e: VecStorage { data: [], nrows: Dyn(1), ncols: Dyn(0) }, id: [FactorId(2653)] }, samples = [Sample { alpha: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], beta: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0] }]
+cc d45abbf05f6f74ab76c552aa126f4e05618c3b5a7f15ec11d4cb6a07a0e73e36 # shrinks to pz = SparsePolyZonotope { c: VecStorage { data: [-1.3405543130219169], nrows: Dyn(1), ncols: Const }, g: VecStorage { data: [-1.1297967912335163], nrows: Dyn(1), ncols: Dyn(1) }, gi: VecStorage { data: [], nrows: Dyn(1), ncols: Dyn(0) }, e: VecStorage { data: [1], nrows: Dyn(1), ncols: Dyn(1) }, id: [FactorId(6787)] }, normal = [0.5100003431633829, 0.0, 0.0], offset = -0.4011764496415718, samples = [Sample { alpha: [0.7964868007905462, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], beta: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0] }]

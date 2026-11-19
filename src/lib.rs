@@ -6,6 +6,7 @@ extern crate alloc;
 #[cfg(feature = "std")]
 extern crate std;
 
+mod constrained;
 mod interval;
 mod polytope;
 mod reduce;
@@ -13,6 +14,7 @@ mod round;
 mod sparse;
 mod zonotope;
 
+pub use constrained::ConstrainedPolyZonotope;
 pub use interval::{Interval, IntervalBox};
 pub use polytope::{Containment, Halfspace, Intersection, Polytope};
 pub use reduce::Reduction;
