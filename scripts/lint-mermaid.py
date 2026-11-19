@@ -44,12 +44,16 @@ def doc_lines(path):
         elif DOC_PREFIX.match(line):
             yield number, DOC_PREFIX.sub("", line, count=1)
         else:
-            # A non-doc line ends any open block in Rust sources.
+            # A non-doc line ends the doc comment, and with it any open block.
             yield number, None
 
 
 def diagrams(path):
-    """Yield (start line, source) for each mermaid block in a file."""
+    """Yield (start line, source) for each mermaid block in a file.
+
+    The source is None for a block whose closing fence is missing: the file or
+    the Rust doc comment ends first.
+    """
     start, body = None, []
 
     for number, text in doc_lines(path):
@@ -59,12 +63,20 @@ def diagrams(path):
 
             continue
 
-        if text is None or FENCE_CLOSE.match(text):
+        if text is None:
+            yield start, None
+            start = None
+            continue
+
+        if FENCE_CLOSE.match(text):
             yield start, "\n".join(body) + "\n"
             start = None
             continue
 
         body.append(text)
+
+    if start is not None:
+        yield start, None
 
 
 def puppeteer_args(workdir):
@@ -96,6 +108,14 @@ def main():
     if not found:
         print("no mermaid diagrams found")
         return
+
+    unterminated = [(path, line) for path, line, source in found if source is None]
+
+    for path, line in unterminated:
+        print(f"{path}:{line}: mermaid block has no closing fence")
+
+    if unterminated:
+        sys.exit(1)
 
     mmdc = shlex.split(os.environ.get("MMDC", "mmdc"))
 
