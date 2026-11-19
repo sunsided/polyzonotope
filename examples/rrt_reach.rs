@@ -14,6 +14,8 @@
 //!
 //! An edge is kept only if every step's swept set is `Disjoint` from every
 //! obstacle. `Intersects` and `Unknown` both reject it: only the proof counts.
+//! (The proof is rigorous only with the `sound` feature; this example runs
+//! in plain `f64`.)
 //!
 //! Run: `cargo run --example rrt_reach`, then open `target/plots/rrt.svg`.
 
