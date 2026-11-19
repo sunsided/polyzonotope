@@ -55,7 +55,7 @@ flowchart LR
 
 A `Polytope` is an intersection of `Halfspace`s `{ x | aᵀx <= d }`, and `Polytope::from_box` turns an `IntervalBox` into one. `intersection` answers whether a set meets a polytope, `containment` whether it lies inside. Both return three values, because an enclosure can prove a negative but not a positive:
 
-- `Intersection::Disjoint` and `Containment::Inside` come from sound outer bounds, and are proofs.
+- `Intersection::Disjoint` and `Containment::Inside` come from outer bounds, and are proofs. They are rigorous only with the `sound` feature; in plain `f64`, rounding can make them wrong by a few ulps at the boundary.
 - `Intersection::Intersects` and `Containment::NotInside` rest on a witness point, evaluated in plain `f64`. Near the boundary they are not certified.
 - `Unknown` means the split budget ran out.
 
