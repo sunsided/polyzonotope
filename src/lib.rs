@@ -7,6 +7,7 @@ extern crate alloc;
 extern crate std;
 
 mod interval;
+mod round;
 mod sparse;
 mod zonotope;
 

@@ -35,6 +35,8 @@ Dependent factors carry global `FactorId`s, so sets derived from the same uncert
 | `linear_map`, `translate`, `minkowski_sum`, `exact_plus`, `cartesian_product`, `compact`, `split` | exact |
 | `interval_hull`, `to_zonotope` | sound enclosure |
 
+"Exact" means exact in real arithmetic. In `f64` the coefficients are rounded, unless you enable the `sound` feature (below).
+
 ```mermaid
 flowchart LR
   Z[Zonotope] -- "from_zonotope (exact)" --> PZ[SparsePolyZonotope]
@@ -90,12 +92,30 @@ Property tests on random sets plus random samples of α and β:
 - Every sampled point lies in `interval_hull`.
 - `to_zonotope` is checked *by construction*: each point is reproduced with explicit coefficients in [-1, 1].
 - Exact operations commute with evaluation.
+- With `sound`, zero-tolerance checks compare results against error-free `TwoSum`/`TwoProduct` values, on inputs where plain `f64` rounds to the wrong side.
 
-## Soundness caveat
-Arithmetic is plain `f64` for now. A sound mode with outward rounding (`inari`) is the top roadmap item, and is required before any formal-verification use.
+## Sound mode
+By default, arithmetic is plain `f64`. An enclosure can then miss a point by a few ulps, so don't rely on it for formal verification. The `sound` feature fixes that with outward rounding from [`inari`](https://crates.io/crates/inari):
+
+- `interval_hull` and `Interval` addition round their bounds outward, and `Zonotope::from_box` rounds its half widths up.
+- Every operation listed as exact computes its new coefficients in interval arithmetic. It stores their midpoints and adds one axis-aligned generator for each dimension whose rounding error is nonzero: an independent generator for a `SparsePolyZonotope`, a plain generator for a `Zonotope`. The result then encloses the set real arithmetic would give.
+- Every coefficient must be finite. This is a precondition, not a check: a NaN or an infinity panics once the arithmetic touches it, but coefficients an operation only copies pass through unchecked.
+
+So under `sound`, the number of generators can grow after any exact operation, and so can the number of `β` values that positional `evaluate` expects. That is up to `2 · dim` per call, since `exact_plus` and `split` append one batch and their internal `compact` may append another. Cargo unifies features across the dependency graph, so read the count instead of assuming it: `independent_generators().ncols()` on a `SparsePolyZonotope`, `num_generators()` on a `Zonotope`. The error generators pile up over long chains of operations. Order reduction (on the roadmap) merges them again.
+
+```toml
+polyzonotope = { version = "0.2", features = ["sound"] }
+```
+
+inari needs `std` and runs only on x86-64 (Haswell or newer) and `AArch64`. On x86-64, set the target CPU in your `.cargo/config.toml`:
+
+```toml
+[target.'cfg(target_arch = "x86_64")']
+rustflags = ["-C", "target-cpu=haswell"]
+```
 
 ## Roadmap
-1. Sound interval mode; `quadratic_map`; order reduction (Girard, PCA); recursive split-based tight hulls.
+1. `quadratic_map`; order reduction (Girard, PCA); recursive split-based tight hulls.
 2. Halfspace intersection checks, containment heuristics, `plotters` visualization.
    An example that plans with an RRT and keeps an edge only if the reachable set along it misses every obstacle.
 3. Separate `polyzonotope-reach` crate: nonlinear reachability by conservative polynomialization (Althoff 2013), with a CORA cross-check.

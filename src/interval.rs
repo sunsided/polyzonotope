@@ -4,6 +4,8 @@ use alloc::vec::Vec;
 
 use nalgebra::DVector;
 
+use crate::round;
+
 /// Closed interval `[lo, hi]` of reals.
 ///
 /// Invariant: `lo <= hi` when built through [`Interval::new`] or [`Interval::point`].
@@ -55,10 +57,12 @@ impl core::ops::Add for Interval {
     type Output = Interval;
 
     /// Minkowski sum `{ a + b | a ∈ self, b ∈ o }`, which is `[lo + o.lo, hi + o.hi]`.
+    ///
+    /// With the `sound` feature the bounds are rounded outward.
     fn add(self, o: Interval) -> Interval {
         Interval {
-            lo: self.lo + o.lo,
-            hi: self.hi + o.hi,
+            lo: round::add_down(self.lo, o.lo),
+            hi: round::add_up(self.hi, o.hi),
         }
     }
 }
