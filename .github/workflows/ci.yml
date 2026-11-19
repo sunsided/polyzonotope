@@ -168,6 +168,27 @@ jobs:
           command: check
           arguments: --all-features
 
+  no-std:
+    name: no_std
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
+        with:
+          toolchain: stable
+          targets: thumbv7em-none-eabihf,thumbv6m-none-eabi
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      # Exercises the repeated-squaring powers that replace f64::powi without std.
+      - run: cargo test --workspace --no-default-features
+      # Cortex-M4: no 64-bit atomics, so portable-atomic's lock-based fallback provides AtomicU64.
+      - run: cargo build --no-default-features --target thumbv7em-none-eabihf
+      # Cortex-M0: no atomic read-modify-write at all, so portable-atomic needs a critical section.
+      - run: cargo build --no-default-features --features portable-atomic/critical-section --target thumbv6m-none-eabi
+
   msrv:
     name: MSRV
     runs-on: ubuntu-latest

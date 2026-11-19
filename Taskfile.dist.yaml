@@ -147,6 +147,13 @@ tasks:
     cmds:
       - cargo deny --all-features check
 
+  no-std:
+    desc: Test without std and build for Cortex-M4 and Cortex-M0 (mirrors the no_std CI job)
+    cmds:
+      - cargo test --workspace --no-default-features
+      - cargo build --no-default-features --target thumbv7em-none-eabihf
+      - cargo build --no-default-features --features portable-atomic/critical-section --target thumbv6m-none-eabi
+
   msrv:
     desc: Check every crate on its declared rust-version
     preconditions:
@@ -189,6 +196,7 @@ tasks:
       - task: doc
       - task: test
       - task: deny
+      - task: no-std
       - task: msrv
       - task: semver
 
