@@ -26,8 +26,13 @@ impl Interval {
     }
 
     /// The degenerate interval `[x, x]`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `x` is NaN, like [`new`](Self::new) does.
     #[must_use]
     pub fn point(x: f64) -> Self {
+        assert!(!x.is_nan(), "interval bound is NaN");
         Self { lo: x, hi: x }
     }
 

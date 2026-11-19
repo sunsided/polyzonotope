@@ -66,12 +66,17 @@ impl Zonotope {
     }
 
     /// `m / n`, the usual measure of representation size.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the set is zero-dimensional, where the order is undefined.
     #[must_use]
     #[expect(
         clippy::cast_precision_loss,
         reason = "generator counts and dimensions stay far below 2^52"
     )]
     pub fn order(&self) -> f64 {
+        assert!(self.dim() > 0, "order of a zero-dimensional zonotope");
         self.num_generators() as f64 / self.dim() as f64
     }
 
