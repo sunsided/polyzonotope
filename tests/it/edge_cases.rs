@@ -1,7 +1,10 @@
 //! Edge cases of single operations: degenerate inputs and the panics they document.
 
 use nalgebra::{DMatrix, DVector};
-use polyzonotope::{FactorId, Interval, ShapeError, SparsePolyZonotope, Zonotope};
+use polyzonotope::{
+    Containment, FactorId, Halfspace, Intersection, Interval, Polytope, ShapeError,
+    SparsePolyZonotope, Zonotope,
+};
 
 /// The parts of a 2-D set before [`SparsePolyZonotope::new`] checks them.
 struct Parts {
@@ -132,14 +135,7 @@ fn split_rejects_inexact_exponents() {
 /// splitting closes the gap at the top to the tolerance.
 #[test]
 fn split_hull_finds_the_true_maximum() {
-    let pz = SparsePolyZonotope::new(
-        DVector::zeros(1),
-        DMatrix::from_row_slice(1, 2, &[1.0, -1.0]),
-        DMatrix::zeros(1, 0),
-        DMatrix::from_row_slice(1, 2, &[1, 2]),
-        FactorId::fresh_n(1),
-    )
-    .expect("consistent shapes");
+    let pz = alpha_minus_alpha_squared();
 
     let coarse = pz.interval_hull().0[0];
     let tight = pz.interval_hull_split(1e-4, 200).0[0];
@@ -151,4 +147,76 @@ fn split_hull_finds_the_true_maximum() {
         tight.hi
     );
     assert!((tight.lo + 2.0).abs() < 1e-3, "lower bound {}", tight.lo);
+}
+
+/// `{ α − α² | α ∈ [-1, 1] }`, which is `[-2, 1/4]`, while its plain hull is `[-2, 1]`.
+fn alpha_minus_alpha_squared() -> SparsePolyZonotope {
+    SparsePolyZonotope::new(
+        DVector::zeros(1),
+        DMatrix::from_row_slice(1, 2, &[1.0, -1.0]),
+        DMatrix::zeros(1, 0),
+        DMatrix::from_row_slice(1, 2, &[1, 2]),
+        FactorId::fresh_n(1),
+    )
+    .expect("consistent shapes")
+}
+
+/// The 1-D halfspace `{ x | s · x <= d }`.
+fn halfspace_1d(s: f64, d: f64) -> Polytope {
+    Halfspace {
+        normal: DVector::from_element(1, s),
+        offset: d,
+    }
+    .into()
+}
+
+/// `α − α²` never reaches `x >= 0.5`: the plain hull cannot tell, splitting proves it.
+#[test]
+fn splitting_proves_disjointness() {
+    let pz = alpha_minus_alpha_squared();
+    let above_half = halfspace_1d(-1.0, -0.5);
+
+    assert_eq!(pz.intersection(&above_half, 0), Intersection::Unknown);
+    assert_eq!(pz.intersection(&above_half, 50), Intersection::Disjoint);
+}
+
+/// `α − α²` reaches `x >= 0.2` (its maximum is 0.25 at `α = 1/2`).
+#[test]
+fn splitting_finds_an_intersection() {
+    let pz = alpha_minus_alpha_squared();
+
+    assert_eq!(
+        pz.intersection(&halfspace_1d(-1.0, -0.2), 50),
+        Intersection::Intersects
+    );
+}
+
+/// `α − α²` stays below 0.3 but not below 0.2; the plain hull decides neither.
+#[test]
+fn splitting_decides_containment() {
+    let pz = alpha_minus_alpha_squared();
+    let (below_03, below_02) = (halfspace_1d(1.0, 0.3), halfspace_1d(1.0, 0.2));
+
+    assert_eq!(pz.containment(&below_03, 0), Containment::Unknown);
+    assert_eq!(pz.containment(&below_03, 50), Containment::Inside);
+    assert_eq!(pz.containment(&below_02, 50), Containment::NotInside);
+}
+
+/// A unit square centered at the origin misses a box beyond one facet at
+/// once. For a box over its corner no witness exists without splitting, so it
+/// takes a few splits to find one.
+#[test]
+fn zonotope_box_intersection() {
+    let z = Zonotope::new(DVector::zeros(2), DMatrix::identity(2, 2));
+    let overlapping =
+        polyzonotope::IntervalBox(vec![Interval::new(0.5, 2.0), Interval::new(0.5, 2.0)]);
+    let beyond = polyzonotope::IntervalBox(vec![Interval::new(1.5, 2.0), Interval::new(-0.5, 0.5)]);
+
+    let overlapping = Polytope::from_box(&overlapping);
+    assert_eq!(z.intersection(&overlapping, 0), Intersection::Unknown);
+    assert_eq!(z.intersection(&overlapping, 8), Intersection::Intersects);
+    assert_eq!(
+        z.intersection(&Polytope::from_box(&beyond), 0),
+        Intersection::Disjoint
+    );
 }

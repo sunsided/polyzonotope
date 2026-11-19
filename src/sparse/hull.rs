@@ -5,6 +5,16 @@ use alloc::vec::Vec;
 
 use crate::{Interval, IntervalBox, SparsePolyZonotope};
 
+/// Result of [`SparsePolyZonotope::search_upper_bound`].
+pub(super) struct Search {
+    /// Sound upper bound of the maximum.
+    pub(super) outer: f64,
+    /// Value at a point of the set, so at most the maximum (plain `f64`).
+    pub(super) inner: f64,
+    /// Number of splits spent.
+    pub(super) splits: usize,
+}
+
 /// A piece of the set during branch and bound, with its outer bound.
 struct Piece {
     /// The piece itself; the pieces together cover the original set.
@@ -28,8 +38,13 @@ impl SparsePolyZonotope {
         IntervalBox(
             (0..self.dim())
                 .map(|i| {
-                    let hi = self.tight_upper_bound(i, 1.0, tol, max_splits);
-                    let lo = -self.tight_upper_bound(i, -1.0, tol, max_splits);
+                    let close_enough = |outer: f64, inner: f64| outer - inner <= tol;
+                    let hi = self
+                        .search_upper_bound(i, 1.0, max_splits, close_enough)
+                        .outer;
+                    let lo = -self
+                        .search_upper_bound(i, -1.0, max_splits, close_enough)
+                        .outer;
                     let (lo, hi) = (lo.max(coarse.0[i].lo), hi.min(coarse.0[i].hi));
                     // Plain-mode rounding can cross the bounds of a near-degenerate set.
                     if lo <= hi {
@@ -42,16 +57,25 @@ impl SparsePolyZonotope {
         )
     }
 
-    /// Upper bound of `sign · x_dim` over the set, by branch and bound.
-    fn tight_upper_bound(&self, dim: usize, sign: f64, tol: f64, max_splits: usize) -> f64 {
+    /// Bounds on `max sign · x_dim` over the set, by branch and bound: splits
+    /// the piece with the largest outer bound until `stop(outer, inner)` holds
+    /// or `max_splits` splits are spent.
+    pub(super) fn search_upper_bound(
+        &self,
+        dim: usize,
+        sign: f64,
+        max_splits: usize,
+        stop: impl Fn(f64, f64) -> bool,
+    ) -> Search {
         let mut inner = self.best_point_value(dim, sign);
         let mut pieces = vec![Piece {
             outer: self.signed_hull_bound(dim, sign),
             set: self.clone(),
         }];
-        for _ in 0..max_splits {
+        let mut splits = 0;
+        while splits < max_splits {
             let worst = arg_max(&pieces);
-            if pieces[worst].outer - inner <= tol {
+            if stop(pieces[worst].outer, inner) {
                 break;
             }
 
@@ -60,6 +84,7 @@ impl SparsePolyZonotope {
                 break;
             };
             let piece = pieces.swap_remove(worst);
+            splits += 1;
             let (lower, upper) = piece.set.split(factor);
             for set in [lower, upper] {
                 inner = inner.max(set.best_point_value(dim, sign));
@@ -68,10 +93,11 @@ impl SparsePolyZonotope {
             }
         }
 
-        pieces
-            .iter()
-            .map(|p| p.outer)
-            .fold(f64::NEG_INFINITY, f64::max)
+        Search {
+            outer: pieces[arg_max(&pieces)].outer,
+            inner,
+            splits,
+        }
     }
 
     /// Upper bound of `sign · x_dim` from the interval hull.
@@ -80,18 +106,40 @@ impl SparsePolyZonotope {
         if sign > 0.0 { iv.hi } else { -iv.lo }
     }
 
-    /// `sign · x_dim` at a point of the set: all `α = 0`, and each `β` at the
-    /// sign that pushes `sign · x_dim` up. A lower bound of the true maximum.
+    /// The larger `sign · x_dim` of two points of the set, a lower bound of the
+    /// true maximum. Both set each `β` to the sign that pushes `sign · x_dim`
+    /// up. One has every `α = 0`; the other sets each `α_k` to the sign of the
+    /// monomials that are odd powers of `α_k` alone, which is the exact
+    /// maximiser for a set that came from a zonotope.
+    ///
+    /// Evaluated in plain `f64`, so the bound is not certified.
     fn best_point_value(&self, dim: usize, sign: f64) -> f64 {
-        let alpha = vec![0.0; self.ids().len()];
+        let up = |x: f64| if sign * x >= 0.0 { 1.0 } else { -1.0 };
         let beta: Vec<f64> = self
             .independent_generators()
             .row(dim)
             .iter()
-            .map(|&g| if sign * g >= 0.0 { 1.0 } else { -1.0 })
+            .map(|&g| up(g))
             .collect();
+        let (g, e) = (self.dependent_generators(), self.exponents());
+        let corner: Vec<f64> = (0..self.ids().len())
+            .map(|k| {
+                let alone_odd = |j: usize| {
+                    e[(k, j)] % 2 == 1 && (0..e.nrows()).all(|r| r == k || e[(r, j)] == 0)
+                };
+                let pull: f64 = (0..g.ncols())
+                    .filter(|&j| alone_odd(j))
+                    .map(|j| g[(dim, j)])
+                    .sum();
+                if pull == 0.0 { 0.0 } else { up(pull) }
+            })
+            .collect();
+        let center = vec![0.0; self.ids().len()];
 
-        sign * self.evaluate(&alpha, &beta)[dim]
+        [center, corner]
+            .iter()
+            .map(|alpha| sign * self.evaluate(alpha, &beta)[dim])
+            .fold(f64::NEG_INFINITY, f64::max)
     }
 
     /// The factor whose monomials weigh most in dimension `dim`, by

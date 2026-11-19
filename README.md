@@ -38,6 +38,8 @@ Dependent factors carry global `FactorId`s, so sets derived from the same uncert
 | `quadratic_map` | exact without independent generators; otherwise the monomials with a `β` are enclosed |
 | `reduce` (`Reduction::Girard`, `Reduction::Pca`), also on `Zonotope` | sound enclosure with at most `order · dim` generators |
 
+| `intersection(&polytope, max_splits)`, `containment(&polytope, max_splits)`, also on `Zonotope` | three-valued check: `Disjoint` / `Inside` are proofs, the other answers are not |
+
 "Exact" means exact in real arithmetic. In `f64` the coefficients are rounded, unless you enable the `sound` feature (below).
 
 ```mermaid
@@ -48,6 +50,16 @@ flowchart LR
   Z -- "interval_hull (tight)" --> B
   B -- "from_box (exact)" --> Z
 ```
+
+## Checking sets against obstacles
+
+A `Polytope` is an intersection of `Halfspace`s `{ x | aᵀx <= d }`, and `Polytope::from_box` turns an `IntervalBox` into one. `intersection` answers whether a set meets a polytope, `containment` whether it lies inside. Both return three values, because an enclosure can prove a negative but not a positive:
+
+- `Intersection::Disjoint` and `Containment::Inside` come from sound outer bounds, and are proofs.
+- `Intersection::Intersects` and `Containment::NotInside` rest on a witness point, evaluated in plain `f64`. Near the boundary they are not certified.
+- `Unknown` means the split budget ran out.
+
+Where safety is at stake, accept only the proofs. Both checks split the set (`max_splits` in total) until they can decide. A zonotope against a single halfspace needs no splits. Points inside a zonotope, and one zonotope inside another, need linear programming and are not covered.
 
 ## Usage
 
@@ -118,7 +130,7 @@ rustflags = ["-C", "target-cpu=haswell"]
 ```
 
 ## Roadmap
-1. Halfspace intersection checks, containment heuristics, `plotters` visualization.
+1. `plotters` visualization.
    An example that plans with an RRT and keeps an edge only if the reachable set along it misses every obstacle.
 2. Separate `polyzonotope-reach` crate: nonlinear reachability by conservative polynomialization (Althoff 2013), with a CORA cross-check.
 3. Constrained polynomial zonotopes.

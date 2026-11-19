@@ -3,7 +3,10 @@
 use std::collections::HashMap;
 
 use nalgebra::{DMatrix, DVector};
-use polyzonotope::{FactorId, Reduction, SparsePolyZonotope, Zonotope};
+use polyzonotope::{
+    Containment, FactorId, Halfspace, Intersection, Interval, IntervalBox, Polytope, Reduction,
+    SparsePolyZonotope, Zonotope,
+};
 use proptest::collection::vec;
 use proptest::prelude::*;
 
@@ -345,6 +348,55 @@ proptest! {
         for (t, c) in tight.0.iter().zip(&coarse.0) {
             prop_assert!(c.lo <= t.lo && t.hi <= c.hi);
         }
+    }
+}
+
+proptest! {
+    /// `Disjoint` and `Inside` are proofs: no sampled point lies in a polytope
+    /// the set was proven disjoint from, and every sampled point lies in one it
+    /// was proven to be inside.
+    #[test]
+    fn polytope_verdicts_are_sound(
+        pz in arb_pz(),
+        corners in vec((-6.0..6.0f64, 0.0..6.0f64), 3),
+        splits in 0usize..12,
+        samples in arb_samples(),
+    ) {
+        let n = pz.dim();
+        let b = IntervalBox(corners[..n].iter().map(|&(lo, w)| Interval::new(lo, lo + w)).collect());
+        let p = Polytope::from_box(&b);
+        let (meets, inside) = (pz.intersection(&p, splits), pz.containment(&p, splits));
+        for s in &samples {
+            let x = eval(&pz, s);
+            let slack = TOL * (1.0 + x.amax());
+            if meets == Intersection::Disjoint {
+                prop_assert!(!p.contains(&x, -slack));
+            }
+            if inside == Containment::Inside {
+                prop_assert!(p.contains(&x, slack));
+            }
+        }
+    }
+
+    /// A zonotope against a single halfspace needs no splits: both verdicts are
+    /// definite and agree with the support function.
+    #[test]
+    fn zonotope_halfspace_verdicts_are_definite(
+        pz in arb_pz(),
+        normal in vec(-1.0..1.0f64, 3),
+        offset in -10.0..10.0f64,
+    ) {
+        let z = pz.to_zonotope();
+        let a = DVector::from_column_slice(&normal[..z.dim()]);
+        let (lowest, highest) = (-support(&z, &(-&a)), support(&z, &a));
+        // Skip the measure-zero cases where the halfspace touches the set within rounding.
+        prop_assume!((lowest - offset).abs() > 1e-9 && (highest - offset).abs() > 1e-9);
+        let h: Polytope = Halfspace { normal: a.clone(), offset }.into();
+
+        let meets = z.intersection(&h, 0);
+        prop_assert_eq!(meets, if lowest > offset { Intersection::Disjoint } else { Intersection::Intersects });
+        let inside = z.containment(&h, 0);
+        prop_assert_eq!(inside, if highest <= offset { Containment::Inside } else { Containment::NotInside });
     }
 }
 
