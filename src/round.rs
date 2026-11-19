@@ -20,7 +20,7 @@ use sound as backend;
 #[cfg(not(feature = "sound"))]
 use plain as backend;
 
-pub(crate) use backend::{add_down, add_up, mid_rad};
+pub(crate) use backend::{add_down, add_up, mid_rad, residual_bound};
 
 /// Outward-rounded arithmetic on top of [`inari`].
 #[cfg(feature = "sound")]
@@ -70,6 +70,23 @@ mod sound {
         }
 
         split(acc)
+    }
+
+    /// Per row, an upper bound of `|I − U Uᵀ| s` for `s >= 0`.
+    pub(crate) fn residual_bound(u: &DMatrix<f64>, s: &DVector<f64>) -> DVector<f64> {
+        let n = u.nrows();
+        DVector::from_fn(n, |i, _| {
+            let mut acc = point(0.0);
+            for k in 0..n {
+                let uut = (0..u.ncols()).fold(point(0.0), |a, j| {
+                    point(u[(i, j)]).mul_add(point(u[(k, j)]), a)
+                });
+                let identity = point(if i == k { 1.0 } else { 0.0 });
+                acc = point((identity - uut).mag()).mul_add(point(s[k]), acc);
+            }
+
+            acc.sup()
+        })
     }
 
     /// An upper bound of `a + b`.
@@ -136,6 +153,11 @@ mod plain {
         (a.dot(&(q * b)), 0.0)
     }
 
+    /// Zero: plain mode takes the computed `U` as exactly orthogonal.
+    pub(crate) fn residual_bound(u: &DMatrix<f64>, _: &DVector<f64>) -> DVector<f64> {
+        DVector::zeros(u.nrows())
+    }
+
     /// `a + b`, taken as its own upper bound.
     pub(crate) fn add_up(a: f64, b: f64) -> f64 {
         a + b
@@ -176,6 +198,11 @@ impl RowErrors {
         if err != 0.0 {
             self.0[row] = add_up(self.0[row], err);
         }
+    }
+
+    /// The bound recorded for dimension `row` so far.
+    pub(crate) fn bound(&self, row: usize) -> f64 {
+        self.0[row]
     }
 
     /// The bounds as generators: one axis-aligned column per dimension with a

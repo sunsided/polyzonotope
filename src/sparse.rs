@@ -7,6 +7,7 @@ use portable_atomic::{AtomicU64, Ordering};
 
 use nalgebra::{DMatrix, DVector};
 
+use crate::reduce::{self, Reduction};
 use crate::round::{self, RowErrors};
 use crate::{Interval, IntervalBox, Zonotope, from_column_list, hcat};
 
@@ -579,6 +580,71 @@ impl SparsePolyZonotope {
         }
         .compact()
         .enclose_factors(&temp)
+    }
+
+    /// Enclosure with at most `order · dim` generators, dependent and
+    /// independent ones counted together.
+    ///
+    /// The generators with the smallest `‖g‖₁ − ‖g‖∞` are dropped: dependent
+    /// ones are enclosed like in [`to_zonotope`](Self::to_zonotope), and
+    /// together with the dropped independent ones they are replaced by a box,
+    /// as `method` says. The kept dependent generators stay exact, so the
+    /// result keeps its dependencies on the remaining factors. The kept
+    /// independent generators come first, then the box. Returns the
+    /// [`compact`](Self::compact)ed set if it already meets the order.
+    ///
+    /// With the `sound` feature and [`Reduction::Pca`], up to `dim` generators
+    /// for rounding errors come on top.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `order < 1`.
+    #[must_use]
+    pub fn reduce(&self, order: f64, method: Reduction) -> Self {
+        // Compact first: the final compact() then has nothing left to merge, so
+        // it adds no rounding-error generators beyond the order.
+        self.compact().reduce_compacted(order, method)
+    }
+
+    /// [`reduce`](Self::reduce) for a set without constant, zero or duplicate monomials.
+    fn reduce_compacted(&self, order: f64, method: Reduction) -> Self {
+        let (h, n) = (self.g.ncols(), self.dim());
+        let column = |j: usize| {
+            if j < h {
+                self.g.column(j)
+            } else {
+                self.gi.column(j - h)
+            }
+        };
+        let count = h + self.gi.ncols();
+        let Some((kept, dropped)) =
+            reduce::select(count, n, order, |j| reduce::girard_metric(column(j).iter()))
+        else {
+            return self.clone();
+        };
+
+        let mut enclosed = self.enclose_monomials(|j| dropped.binary_search(&j).is_ok());
+        let dropped_independent = dropped.iter().filter(|&&j| j >= h);
+        enclosed
+            .generators
+            .extend(dropped_independent.map(|&j| column(j).into_owned()));
+        let enclosure = reduce::enclose(
+            &from_column_list(n, &enclosed.generators),
+            method,
+            &mut enclosed.errs,
+        );
+        let kept_independent: Vec<usize> =
+            kept.iter().filter(|&&j| j >= h).map(|&j| j - h).collect();
+        let gi = hcat(&self.gi.select_columns(&kept_independent), &enclosure);
+
+        Self {
+            c: enclosed.center,
+            g: self.g.select_columns(&enclosed.kept),
+            gi: hcat(&gi, &enclosed.errs.generators()),
+            e: self.e.select_columns(&enclosed.kept),
+            id: self.id.clone(),
+        }
+        .compact()
     }
 
     /// Splits the domain of `factor` into `[-1, 0]` and `[0, 1]`. Each half

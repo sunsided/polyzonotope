@@ -17,7 +17,7 @@ rustdoc-args = ["--html-in-header", "docs/mermaid.html"]
 rustc-args = ["-C", "target-cpu=haswell"]
 
 [dependencies]
-nalgebra = { version = "0.35", default-features = false, features = ["alloc"] }
+nalgebra = { version = "0.35", default-features = false, features = ["alloc", "libm"] }
 portable-atomic = "1"
 inari = { version = "2", default-features = false, optional = true }
 

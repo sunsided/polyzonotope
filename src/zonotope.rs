@@ -4,6 +4,7 @@ use alloc::vec::Vec;
 
 use nalgebra::{DMatrix, DVector};
 
+use crate::reduce::{self, Reduction};
 use crate::round::{self, RowErrors};
 use crate::{Interval, IntervalBox, hcat};
 
@@ -139,6 +140,36 @@ impl Zonotope {
         let c = round::vec_add(&self.center, &o.center, &mut errs);
 
         Self::with_errors(c, &hcat(&self.generators, &o.generators), &errs)
+    }
+
+    /// Enclosure with at most `order · dim` generators: the generators with the
+    /// smallest `‖g‖₁ − ‖g‖∞` are replaced by a box, as `method` says.
+    /// Returns a copy if the zonotope already meets the order.
+    ///
+    /// With the `sound` feature and [`Reduction::Pca`], up to `dim` generators
+    /// for rounding errors come on top.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `order < 1`.
+    #[must_use]
+    pub fn reduce(&self, order: f64, method: Reduction) -> Self {
+        let g = &self.generators;
+        let Some((kept, dropped)) = reduce::select(g.ncols(), self.dim(), order, |j| {
+            reduce::girard_metric(g.column(j).iter())
+        }) else {
+            return self.clone();
+        };
+
+        let mut errs = RowErrors::new(self.dim());
+        let dropped = g.select_columns(&dropped);
+        let enclosure = reduce::enclose(&dropped, method, &mut errs);
+
+        Self::with_errors(
+            self.center.clone(),
+            &hcat(&g.select_columns(&kept), &enclosure),
+            &errs,
+        )
     }
 
     /// Tight interval enclosure (rounded outward with the `sound` feature).
