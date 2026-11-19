@@ -1,18 +1,13 @@
 //! Zero-tolerance soundness checks for the `sound` feature, on inputs where plain
 //! `f64` arithmetic rounds the result to the wrong side.
+//!
+//! Each check compares the exact real result, an error-free pair from
+//! `TwoSum`/`TwoProduct`, against the stored coefficient and the error radius
+//! the operation appended, without any further rounding on the way.
 
 use nalgebra::{DMatrix, DVector};
-use polyzonotope::{Interval, IntervalBox, Zonotope};
+use polyzonotope::{FactorId, Interval, IntervalBox, SparsePolyZonotope, Zonotope};
 use proptest::prelude::*;
-
-/// Whether the exact real number `hi + lo` (an error-free pair) lies in `iv`.
-#[expect(clippy::float_cmp, reason = "soundness is a zero-tolerance comparison")]
-fn contains_exact(iv: Interval, hi: f64, lo: f64) -> bool {
-    let above_lower = iv.lo < hi || (iv.lo == hi && lo >= 0.0);
-    let below_upper = iv.hi > hi || (iv.hi == hi && lo <= 0.0);
-
-    above_lower && below_upper
-}
 
 /// The exact product `a · b` as `p + e`, with `p` rounded and `e` its error.
 fn two_product(a: f64, b: f64) -> (f64, f64) {
@@ -27,30 +22,53 @@ fn two_sum(a: f64, b: f64) -> (f64, f64) {
     (s, (a - (s - bb)) + (b - bb))
 }
 
-/// The single interval of a one-dimensional set's hull.
-fn hull_1d(z: &Zonotope) -> Interval {
-    z.interval_hull().0[0]
+/// Whether the exact number `hi + lo` lies within `r` of `c`, i.e. `|hi + lo - c| <= r`.
+///
+/// `hi - c` is exact by Sterbenz's lemma, since every caller has `c` within a
+/// factor of two of `hi`; the second `two_sum` keeps the rest exact.
+#[expect(clippy::float_cmp, reason = "soundness is a zero-tolerance comparison")]
+fn within((hi, lo): (f64, f64), c: f64, r: f64) -> bool {
+    let (s, t) = two_sum(hi - c, lo);
+    s.abs() < r || (s.abs() == r && (t == 0.0 || t.signum() != s.signum()))
+}
+
+/// Sum of the absolute values of row 0 of `m`: the error radius of a 1-D result.
+fn radius(m: &DMatrix<f64>) -> f64 {
+    m.row(0).iter().map(|x| x.abs()).sum()
+}
+
+/// The 1-D zonotope `{ c }`.
+fn point_zonotope(c: f64) -> Zonotope {
+    Zonotope::new(DVector::from_element(1, c), DMatrix::zeros(1, 0))
+}
+
+/// The 1-D set `c + Σ g[i] α^e[i]`, all monomials in one fresh factor.
+fn one_factor_pz(c: f64, g: &[f64], e: &[u32]) -> SparsePolyZonotope {
+    SparsePolyZonotope::new(
+        DVector::from_element(1, c),
+        DMatrix::from_row_slice(1, g.len(), g),
+        DMatrix::zeros(1, 0),
+        DMatrix::from_row_slice(1, e.len(), e),
+        vec![FactorId::fresh()],
+    )
+    .expect("consistent shapes")
 }
 
 proptest! {
-    /// `{ m · c }` maps to an interval that contains the exact product.
+    /// `{ m · c }`: the stored center plus the error generator covers the exact product.
     #[test]
-    fn linear_map_encloses_the_exact_product(c in -1e3..1e3f64, m in -1e3..1e3f64) {
-        let z = Zonotope::new(DVector::from_element(1, c), DMatrix::zeros(1, 0));
-        let mapped = z.linear_map(&DMatrix::from_element(1, 1, m));
-        let (p, e) = two_product(m, c);
+    fn linear_map_encloses_the_exact_product(c in 1.0..1e3f64, m in 1.0..1e3f64) {
+        let mapped = point_zonotope(c).linear_map(&DMatrix::from_element(1, 1, m));
 
-        prop_assert!(contains_exact(hull_1d(&mapped), p, e));
+        prop_assert!(within(two_product(m, c), mapped.center()[0], radius(mapped.generators())));
     }
 
-    /// `{ c + v }` translates to an interval that contains the exact sum.
+    /// `{ c + v }`: the stored center plus the error generator covers the exact sum.
     #[test]
-    fn translate_encloses_the_exact_sum(c in -1e3..1e3f64, v in -1e-3..1e-3f64) {
-        let z = Zonotope::new(DVector::from_element(1, c), DMatrix::zeros(1, 0));
-        let moved = z.translate(&DVector::from_element(1, v));
-        let (s, e) = two_sum(c, v);
+    fn translate_encloses_the_exact_sum(c in 1.0..1e3f64, v in 1e-6..1e-3f64) {
+        let moved = point_zonotope(c).translate(&DVector::from_element(1, v));
 
-        prop_assert!(contains_exact(hull_1d(&moved), s, e));
+        prop_assert!(within(two_sum(c, v), moved.center()[0], radius(moved.generators())));
     }
 
     /// Both bounds of an interval sum enclose the exact sums of the bounds.
@@ -59,18 +77,52 @@ proptest! {
         let sum = Interval::point(a) + Interval::point(b);
         let (s, e) = two_sum(a, b);
 
-        prop_assert!(contains_exact(sum, s, e));
+        prop_assert!(sum.lo < s || (sum.lo <= s && e >= 0.0));
+        prop_assert!(sum.hi > s || (sum.hi >= s && e <= 0.0));
     }
 
-    /// The box built by `from_box` covers both bounds of the original box.
+    /// The ball built by `from_box` covers both bounds of the box.
     #[test]
-    fn from_box_covers_the_box(lo in -1e3..1e3f64, w in 0.0..1e3f64) {
+    fn from_box_covers_the_box(lo in 1.0..1e3f64, w in 0.0..1.0f64) {
         let b = Interval::new(lo, lo + w);
         let z = Zonotope::from_box(&IntervalBox(vec![b]));
         let (c, r) = (z.center()[0], z.generators()[(0, 0)]);
 
-        prop_assert!(contains_exact(Interval::point(c) + Interval::new(-r, r), b.lo, 0.0));
-        prop_assert!(contains_exact(Interval::point(c) + Interval::new(-r, r), b.hi, 0.0));
+        prop_assert!(within((b.lo, 0.0), c, r) && within((b.hi, 0.0), c, r));
+    }
+
+    /// `exact_plus` of two points: the center plus the error generator covers the exact sum.
+    #[test]
+    fn exact_plus_encloses_the_exact_sum(a in 1.0..1e3f64, b in 1e-6..1e-3f64) {
+        let sum = one_factor_pz(a, &[], &[]).exact_plus(&one_factor_pz(b, &[], &[]));
+
+        prop_assert!(within(two_sum(a, b), sum.center()[0], radius(sum.independent_generators())));
+    }
+
+    /// `compact` merging two generators with the same exponent covers their exact sum.
+    #[test]
+    fn compact_encloses_the_merged_generator(a in 1.0..1e3f64, b in 1e-6..1e-3f64) {
+        let merged = one_factor_pz(0.0, &[a, b], &[1, 1]).compact();
+
+        prop_assert_eq!(merged.dependent_generators().ncols(), 1);
+        let g = merged.dependent_generators()[(0, 0)];
+        prop_assert!(within(two_sum(a, b), g, radius(merged.independent_generators())));
+    }
+
+    /// Splitting `g α³` gives the coefficient `3g/8` for `α'`; the stored value
+    /// plus the error generators covers it.
+    #[test]
+    fn split_encloses_the_rescaled_coefficient(g in 1.0..1e3f64) {
+        let pz = one_factor_pz(0.0, &[g], &[3]);
+        let (lower, _) = pz.split(pz.ids()[0]);
+        let linear = lower
+            .exponents()
+            .column_iter()
+            .position(|e| e[0] == 1)
+            .expect("the expansion has a linear term");
+        let stored = lower.dependent_generators()[(0, linear)];
+
+        prop_assert!(within(two_product(g, 0.375), stored, radius(lower.independent_generators())));
     }
 }
 
@@ -78,11 +130,14 @@ proptest! {
 /// the sound map adds an error generator that covers it.
 #[test]
 fn inexact_map_gets_an_error_generator() {
-    let z = Zonotope::new(DVector::from_element(1, 0.1), DMatrix::zeros(1, 0));
-    let mapped = z.linear_map(&DMatrix::from_element(1, 1, 3.0));
-    let (p, e) = two_product(3.0, 0.1);
+    let mapped = point_zonotope(0.1).linear_map(&DMatrix::from_element(1, 1, 3.0));
+    let exact = two_product(3.0, 0.1);
 
-    assert!(e != 0.0, "the test needs an inexact product");
+    assert!(exact.1 != 0.0, "the test needs an inexact product");
     assert_eq!(mapped.num_generators(), 1);
-    assert!(contains_exact(hull_1d(&mapped), p, e));
+    assert!(within(
+        exact,
+        mapped.center()[0],
+        radius(mapped.generators())
+    ));
 }

@@ -523,9 +523,10 @@ impl SparsePolyZonotope {
             "split needs exponents of at most {MAX_SPLIT_EXPONENT}, found {d}"
         );
 
+        // Repeated squaring, not `powi`: powers of 1/2 and ±1 are exact that way.
         (0..=d)
             .map(|j| {
-                let coef = binomial(d, j) * powu(0.5, d) * powu(sign, d - j);
+                let coef = binomial(d, j) * pow_by_squaring(0.5, d) * pow_by_squaring(sign, d - j);
                 let mut exp: Vec<u32> = self.e.column(i).iter().copied().collect();
                 exp[k] = j;
                 (exp, coef)
