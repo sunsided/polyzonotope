@@ -1,5 +1,5 @@
 # Keep in sync with `task ci` in the Taskfile. Job `name:`s are the required status checks.
-# Action refs are tags here; run scripts/pin-actions.py to pin them to commit SHAs.
+# Actions are pinned to commit SHAs; Dependabot keeps the SHAs and their version comments current.
 name: CI
 
 on:
@@ -30,7 +30,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      # Set BRANCH_FLOW to gitflow for Git Flow repositories (same value as in the Taskfile).
+      # The second argument is the branching model; keep it equal to BRANCH_FLOW in the Taskfile.
       - run: sh scripts/check-branch.sh "$HEAD_REF" github
         env:
           HEAD_REF: ${{ github.head_ref }}

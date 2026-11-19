@@ -1,8 +1,7 @@
 # release-plz (git-only mode): keeps a release PR up to date on every push to main and, once it
-# is merged, creates the vX.Y.Z / <crate>-vX.Y.Z tags and GitHub Releases. It never publishes: the
+# is merged, creates the vX.Y.Z tag and GitHub Release. It never publishes: the
 # tag push starts publish-crates-io.yml, which publishes from the tag-restricted `crates-io` environment.
 # The App token matters: tags and PRs created with GITHUB_TOKEN would not trigger other workflows.
-# Git Flow repos drop the release-pr job (docs/release.md). Pin actions with scripts/pin-actions.py.
 name: Release-plz
 
 on:
