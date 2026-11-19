@@ -6,7 +6,7 @@ use polyzonotope::{ConstrainedPolyZonotope, Halfspace, IntervalBox, Polytope};
 use proptest::collection::vec;
 use proptest::prelude::*;
 
-use crate::strategies::{TOL, arb_pz, arb_samples, eval};
+use crate::strategies::{TOL, alpha_map, arb_pz, arb_samples, close, eval, pad};
 
 /// Split budget for the refined hulls in these tests.
 const SPLITS: usize = 6;
@@ -36,6 +36,45 @@ proptest! {
                 let hull = hull.as_ref();
                 prop_assert!(hull.is_some_and(|b| in_hull(b, &x)), "feasible point lost: {x}");
             }
+        }
+    }
+
+    /// The cut is exact and shares the set's factors: for a feasible point,
+    /// the slack value that closes `aᵀx + s = d` makes the constraint row
+    /// vanish at the same α and β, and the set rows give the point.
+    #[test]
+    fn halfspace_cut_is_exact(
+        pz in arb_pz(),
+        normal in vec(-1.0..1.0f64, 3),
+        offset in -5.0..5.0f64,
+        samples in arb_samples(),
+    ) {
+        let n = pz.dim();
+        let a = DVector::from_column_slice(&normal[..n]);
+        let h = Halfspace { normal: a.clone(), offset };
+        let cut = ConstrainedPolyZonotope::from(pz.clone()).intersect_halfspace(&h);
+        let stacked = cut.stacked();
+        let lo = pz.linear_map(&DMatrix::from_row_slice(1, n, a.as_slice())).interval_hull().0[0].lo;
+        prop_assume!(cut.num_constraints() == 1 && lo <= offset);
+        let half = (offset - lo) / 2.0;
+        let slack = stacked.ids().iter().copied().find(|id| !pz.ids().contains(id));
+        // The constraint row reuses the set's β; no copies are appended in plain mode.
+        if !cfg!(feature = "sound") {
+            prop_assert_eq!(stacked.independent_generators().ncols(), pz.independent_generators().ncols());
+        }
+        for s in &samples {
+            let x = eval(&pz, s);
+            if a.dot(&x) > offset {
+                continue;
+            }
+            let alpha = alpha_map(pz.ids(), s);
+            let closing = (offset - a.dot(&x)) / half - 1.0;
+            let value = |id| if Some(id) == slack { closing } else { alpha.get(&id).copied().unwrap_or(0.0) };
+            let beta = pad(&s.beta[..pz.independent_generators().ncols()], stacked.independent_generators().ncols());
+            let point = stacked.evaluate_with(value, &beta);
+            let expected = DVector::from_fn(n + 1, |i, _| if i < n { x[i] } else { 0.0 });
+
+            prop_assert!(close(&point, &expected), "{point} vs {expected}");
         }
     }
 

@@ -37,8 +37,12 @@ impl From<SparsePolyZonotope> for ConstrainedPolyZonotope {
 }
 
 impl ConstrainedPolyZonotope {
-    /// `{ set(α, β) | constraints(α, β) = 0 }`. Factors with the same
-    /// [`FactorId`] in both are the same factor.
+    /// `{ set(α, β) | constraints(α, β') = 0 }`. Dependent factors with the
+    /// same [`FactorId`] in both are the same factor. Independent factors are
+    /// positional, so the `β'` of `constraints` are separate from the `β` of
+    /// `set`; build constraints on the set's `β` with
+    /// [`intersect_halfspace`](Self::intersect_halfspace) or
+    /// [`intersection`](Self::intersection) instead.
     #[must_use]
     pub fn new(set: &SparsePolyZonotope, constraints: &SparsePolyZonotope) -> Self {
         Self {
@@ -189,35 +193,48 @@ impl ConstrainedPolyZonotope {
     #[must_use]
     pub fn intersect_halfspace(&self, h: &Halfspace) -> Self {
         assert_eq!(h.normal.len(), self.dim, "normal must match the dimension");
-        let along = self
+        // Append the row aᵀx by one linear map, so it shares every α and β with the set.
+        let rows = self.stacked.dim();
+        let extended = self
             .stacked
-            .linear_map(&DMatrix::from_fn(1, self.stacked.dim(), |_, j| {
-                if j < self.dim { h.normal[j] } else { 0.0 }
+            .linear_map(&DMatrix::from_fn(rows + 1, rows, |i, j| {
+                if i < rows {
+                    f64::from(u8::from(i == j))
+                } else if j < self.dim {
+                    h.normal[j]
+                } else {
+                    0.0
+                }
             }));
-        let range = along.interval_hull().0[0];
+        let range = extended.interval_hull().0[rows];
         if range.hi <= h.offset {
             return self.clone();
         }
 
-        let row = if range.lo > h.offset {
-            constant_pz(1.0)
-        } else {
-            // s = half + half · α_s ranges over [0, 2 half] ⊇ [0, d − min aᵀx].
-            // shortcut: halving is exact unless `u` is subnormal; irrelevant at any practical scale.
-            let half = 0.5 * round::add_up(h.offset, -range.lo);
-            let slack = SparsePolyZonotope::new(
-                DVector::from_element(1, -h.offset),
-                DMatrix::from_row_slice(1, 2, &[half, half]),
-                DMatrix::zeros(1, 0),
-                DMatrix::from_row_slice(1, 2, &[0, 1]),
-                vec![FactorId::fresh()],
-            )
-            .expect("consistent shapes");
-            along.exact_plus(&slack)
-        };
+        let last = |v: f64| DVector::from_fn(rows + 1, |i, _| if i == rows { v } else { 0.0 });
+        if range.lo > h.offset {
+            // The unsatisfiable constraint 1 = 0: zero the new row, then move it to 1.
+            let zeroed = DMatrix::from_fn(rows + 1, rows, |i, j| f64::from(u8::from(i == j)));
+            return Self {
+                stacked: self.stacked.linear_map(&zeroed).translate(&last(1.0)),
+                dim: self.dim,
+            };
+        }
+
+        // aᵀx + s − d = 0 with s = half + half · α_s over [0, 2 half] ⊇ [0, d − min aᵀx].
+        // shortcut: halving is exact unless `u` is subnormal; irrelevant at any practical scale.
+        let half = 0.5 * round::add_up(h.offset, -range.lo);
+        let slack = SparsePolyZonotope::new(
+            last(-h.offset),
+            DMatrix::from_fn(rows + 1, 2, |i, _| if i == rows { half } else { 0.0 }),
+            DMatrix::zeros(rows + 1, 0),
+            DMatrix::from_row_slice(1, 2, &[0, 1]),
+            vec![FactorId::fresh()],
+        )
+        .expect("consistent shapes");
 
         Self {
-            stacked: self.stacked.cartesian_product(&row),
+            stacked: extended.exact_plus(&slack),
             dim: self.dim,
         }
     }
@@ -352,16 +369,4 @@ impl ConstrainedPolyZonotope {
 
         self.stacked.linear_map(&m)
     }
-}
-
-/// The 1-D set `{ v }`, used as the unsatisfiable constraint `v = 0` for `v != 0`.
-fn constant_pz(v: f64) -> SparsePolyZonotope {
-    SparsePolyZonotope::new(
-        DVector::from_element(1, v),
-        DMatrix::zeros(1, 0),
-        DMatrix::zeros(1, 0),
-        DMatrix::zeros(0, 0),
-        Vec::new(),
-    )
-    .expect("consistent shapes")
 }
