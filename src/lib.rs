@@ -1,10 +1,25 @@
-//! Set representations for reachability analysis: [`IntervalBox`] and
-//! [`Zonotope`].
+//! Set representations for reachability analysis: [`IntervalBox`],
+//! [`Zonotope`], and [`SparsePolyZonotope`] (Kochdumper & Althoff, 2021).
+//!
+//! A sparse polynomial zonotope is the set
+//!
+//! ```text
+//! PZ = { c + Σ_i (Π_k α_k^E[k,i]) G[:,i] + Σ_j β_j GI[:,j]  |  α, β ∈ [-1, 1] }
+//! ```
+//!
+//! Dependent factors `α_k` carry global [`FactorId`]s, so two sets built from
+//! the same uncertainty stay correlated through later operations.
+//!
+//! **Soundness caveat:** this version uses plain `f64` arithmetic. Enclosures
+//! are mathematically sound, but rounding is not yet outward-directed; a
+//! sound mode (interval arithmetic via `inari`) is on the roadmap.
 
 mod interval;
+mod sparse;
 mod zonotope;
 
 pub use interval::{Interval, IntervalBox};
+pub use sparse::{FactorId, ShapeError, SparsePolyZonotope};
 pub use zonotope::Zonotope;
 
 use nalgebra::DMatrix;
