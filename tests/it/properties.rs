@@ -82,8 +82,37 @@ proptest! {
     fn translate_is_exact(pz in arb_pz(), v in vec(-5.0..5.0f64, 3), samples in arb_samples()) {
         let v = DVector::from_column_slice(&v[..pz.dim()]);
         let moved = pz.translate(&v);
+        prop_assert!(close(moved.center(), &(pz.center() + &v)));
         for s in &samples {
             prop_assert!(close(&eval(&moved, s), &(eval(&pz, s) + &v)));
+        }
+    }
+
+    /// The exact zonotope operations commute with evaluation: linear maps and
+    /// translations act on each point, and a Minkowski sum adds the points
+    /// of both operands for their own coefficients.
+    #[test]
+    fn zonotope_operations_are_exact(
+        pz in arb_pz(),
+        m in vec(-3.0..3.0f64, 9),
+        v in vec(-5.0..5.0f64, 3),
+        samples in arb_samples(),
+    ) {
+        let z = pz.to_zonotope();
+        let n = z.dim();
+        let m = DMatrix::from_fn(n, n, |i, j| m[i * 3 + j]);
+        let v = DVector::from_column_slice(&v[..n]);
+        let (mapped, moved, sum) = (z.linear_map(&m), z.translate(&v), z.minkowski_sum(&z));
+        let k = z.num_generators();
+        for s in &samples {
+            let coeffs: Vec<f64> = (0..k).map(|j| s.beta[j % s.beta.len()]).collect();
+            let other: Vec<f64> = (0..k).map(|j| s.alpha[j % s.alpha.len()]).collect();
+            let both: Vec<f64> = coeffs.iter().chain(&other).copied().collect();
+            let point = z.evaluate(&coeffs);
+
+            prop_assert!(close(&mapped.evaluate(&coeffs), &(&m * &point)));
+            prop_assert!(close(&moved.evaluate(&coeffs), &(&point + &v)));
+            prop_assert!(close(&sum.evaluate(&both), &(&point + z.evaluate(&other))));
         }
     }
 
