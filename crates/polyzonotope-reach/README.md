@@ -60,7 +60,7 @@ The inputs are never static, since `u(t)` may jump inside `U` during the step: e
 
 ### Keeping dependencies through reduction
 
-The linear step and the order reduction make generators independent: the error box, the time-interval hull, and every dependent monomial that reduction encloses. In the next step's quadratic map, products of independent generators are enclosed one by one, so a wide set loses its shape step by step. With `Restructure::Lift` (the default), every independent generator of the time-point set becomes a dependent factor of its own after the Girard reduction. That is exact, and later quadratic maps then treat those factors as polynomials. It costs 2 to 3 times as much per step. `Restructure::Off` keeps the old behavior.
+The linear step and the order reduction make generators independent: the error box, the time-interval hull, and every dependent monomial that reduction encloses. In the next step's quadratic map, products of independent generators are enclosed one by one, so a wide set loses its shape step by step. With `Restructure::Lift` (the default), every independent generator of the time-point set becomes a dependent factor of its own after the Girard reduction. That is exact, and later quadratic maps then treat those factors as polynomials. It costs 2 to 3 times as much per step. Lifted pieces also split less well, so systems that split a lot need roughly twice the `max_pieces` they need without lifting: the damped cubic of the tests needs 12 pieces instead of 6, and with 32 it ends 17% narrower than without lifting. `Restructure::Off` keeps the old behavior.
 
 ### Adaptive steps
 

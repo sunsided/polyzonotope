@@ -180,6 +180,14 @@ pub enum Restructure {
     /// number of factors stays at most the number of generators, since
     /// [`compact`](polyzonotope::SparsePolyZonotope::compact) drops the
     /// unused ones.
+    ///
+    /// Lifted pieces split less well: after a step the lifted factors
+    /// appear in many monomials, so no single cut halves the bulk. Systems
+    /// that split a lot need roughly twice the
+    /// [`max_pieces`](NonlinearSettings::max_pieces) they need without
+    /// lifting. On the damped cubic `x₀' = −x₀ − x₀³` from radius 1,
+    /// polynomialization needs 12 pieces where it needs 6 without; with 32
+    /// it ends 17% narrower than without lifting.
     #[default]
     Lift,
 }

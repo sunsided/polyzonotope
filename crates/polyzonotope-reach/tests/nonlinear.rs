@@ -406,27 +406,69 @@ both_methods!(merging, pieces_merge_as_the_set_contracts);
 /// Without lifting: with it, polynomialization diverges at step 7 here, and
 /// the merging, not the lifting, is under test.
 fn pieces_merge_as_the_set_contracts(method: Method) {
-    /// The vector field in plain `f64`.
-    fn damped(x: &DVector<f64>, _: f64) -> DVector<f64> {
-        DVector::from_vec(vec![-x[0] - x[0].powi(3), -x[1] + 0.5 * x[0] * x[0]])
-    }
-
-    let dynamics = Polynomial::new(2, 1)
-        .term(0, -1.0, &[1, 0, 0])
-        .term(0, -1.0, &[3, 0, 0])
-        .term(1, -1.0, &[0, 1, 0])
-        .term(1, 0.5, &[2, 0, 0]);
     let settings = NonlinearSettings {
         restructure: Restructure::Off,
         ..sharp(0.1, method)
     };
-    let flowpipe = NonlinearReach::new(dynamics, settings)
+    let flowpipe = NonlinearReach::new(damped(), settings)
         .reach(&initial_box(&[0.0, 0.0], 1.0), &input(0.0), 40)
         .expect("splitting carries the set");
     let counts: Vec<usize> = flowpipe.iter().map(Vec::len).collect();
     assert!(counts.iter().any(|&c| c > 1), "{counts:?}");
     assert!(counts.windows(2).any(|w| w[1] < w[0]), "{counts:?}");
-    check_trajectories(damped, &flowpipe, (&[0.0, 0.0], 1.0, 0.0), 12);
+    check_trajectories(damped_f64, &flowpipe, (&[0.0, 0.0], 1.0, 0.0), 12);
+}
+
+/// `x₀' = −x₀ − x₀³`, `x₁' = −x₁ + ½ x₀²`, with an unused input.
+fn damped() -> Polynomial {
+    Polynomial::new(2, 1)
+        .term(0, -1.0, &[1, 0, 0])
+        .term(0, -1.0, &[3, 0, 0])
+        .term(1, -1.0, &[0, 1, 0])
+        .term(1, 0.5, &[2, 0, 0])
+}
+
+/// The vector field of [`damped`] in plain `f64`.
+fn damped_f64(x: &DVector<f64>, _: f64) -> DVector<f64> {
+    DVector::from_vec(vec![-x[0] - x[0].powi(3), -x[1] + 0.5 * x[0] * x[0]])
+}
+
+/// The damped cubic with polynomialization and the default lifting: lifted
+/// pieces split less well, so it needs `max_pieces` 32 where `Off` gets by
+/// with 8, and then ends narrower than `Off` with the same budget. Every
+/// sampled trajectory stays inside.
+#[test]
+fn lifted_pieces_need_a_larger_budget() {
+    let start = initial_box(&[0.0, 0.0], 1.0);
+    let run = |restructure| {
+        let settings = NonlinearSettings {
+            restructure,
+            max_pieces: 32,
+            ..sharp(0.1, Method::Polynomialization)
+        };
+        NonlinearReach::new(damped(), settings)
+            .reach(&start, &input(0.0), 40)
+            .expect("32 pieces carry the set")
+    };
+    let widest = |flowpipe: &[Vec<Step>]| -> f64 {
+        let last = flowpipe.last().expect("40 steps");
+        last.iter()
+            .map(|s| {
+                s.time_point
+                    .interval_hull()
+                    .0
+                    .iter()
+                    .map(Interval::width)
+                    .sum::<f64>()
+            })
+            .fold(0.0, f64::max)
+    };
+
+    let lifted = run(Restructure::Lift);
+    let boxed = widest(&run(Restructure::Off));
+    assert!(lifted.iter().map(Vec::len).max() > Some(8));
+    assert!(widest(&lifted) < boxed, "{} vs {boxed}", widest(&lifted));
+    check_trajectories(damped_f64, &lifted, (&[0.0, 0.0], 1.0, 0.0), 12);
 }
 
 /// `x₀' = x₁`, `x₁' = −x₀ − x₀ u`: a spring whose stiffness the input
