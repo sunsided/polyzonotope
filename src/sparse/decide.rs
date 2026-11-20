@@ -182,7 +182,7 @@ impl SparsePolyZonotope {
     /// The factor whose monomials weigh most over all dimensions, by
     /// `Σ_j ‖G[:, j]‖₁ E[k, j]`; `None` if no monomial depends on a factor
     /// that [`split`](Self::split) accepts.
-    fn heaviest_factor_overall(&self) -> Option<FactorId> {
+    pub(crate) fn heaviest_factor_overall(&self) -> Option<FactorId> {
         let (g, e) = (self.dependent_generators(), self.exponents());
         let weight = |k: usize| -> f64 {
             (0..g.ncols())

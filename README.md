@@ -40,6 +40,14 @@ Dependent factors carry global `FactorId`s, so sets derived from the same uncert
 | `intersection(&polytope, max_splits)`, `containment(&polytope, max_splits)`, also on `Zonotope` | three-valued check: `Disjoint` / `Inside` are proofs, the other answers are not |
 | `split_pieces(splits)`, `Zonotope::polygon` (2-D) | exact pieces; a polygon outline for drawing |
 
+`ConstrainedPolyZonotope` (Kochdumper & Althoff 2023) restricts a sparse polynomial zonotope to the factor values where a polynomial constraint vanishes:
+
+| Operation | Exact? |
+|---|---|
+| `linear_map`, `translate`, `minkowski_sum`, `intersection`, `intersect_halfspace`, `intersect_polytope` | exact |
+| `interval_hull` (constraints ignored), `interval_hull_split` (infeasible pieces dropped) | sound enclosure |
+| `proven_empty(max_splits)` | `true` is a proof; `false` means "not proven" |
+
 "Exact" means exact in real arithmetic. In `f64` the coefficients are rounded, unless you enable the `sound` feature (below).
 
 ```mermaid
@@ -133,7 +141,6 @@ rustflags = ["-C", "target-cpu=haswell"]
 
 ## Roadmap
 1. Separate `polyzonotope-reach` crate: nonlinear reachability by conservative polynomialization (Althoff 2013), with a CORA cross-check.
-2. Constrained polynomial zonotopes.
 
 ## License
 
