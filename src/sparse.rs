@@ -785,6 +785,15 @@ fn pow_by_squaring(mut x: f64, mut n: u32) -> f64 {
     acc
 }
 
+impl SparsePolyZonotope {
+    /// Whether [`split`](Self::split) accepts the factor in row `k`: none of
+    /// its exponents is above [`MAX_SPLIT_EXPONENT`]. Branch and bound skips
+    /// the others instead of panicking.
+    pub(crate) fn can_split(&self, k: usize) -> bool {
+        self.e.row(k).iter().all(|&d| d <= MAX_SPLIT_EXPONENT)
+    }
+}
+
 /// Largest exponent [`SparsePolyZonotope::split`] accepts: every `C(d, j)` with
 /// `d <= 56` stays below `2^53`, so [`binomial`] and the coefficients
 /// `C(d, j) / 2^d` of the rescaling are exact.
