@@ -174,7 +174,7 @@ impl Zonotope {
 
     /// Whether the zonotope meets the polytope `p`; see
     /// [`SparsePolyZonotope::intersection`]. Against a single halfspace the
-    /// answer is definite without any splits.
+    /// answer is definite without any splits, up to rounding at the boundary.
     ///
     /// # Panics
     ///
@@ -222,7 +222,17 @@ impl Zonotope {
             })
             .collect();
         // Within a half plane, a comes first when b lies counter-clockwise of it.
-        gens.sort_by(|a, b| 0.0f64.total_cmp(&(a[0] * b[1] - a[1] * b[0])));
+        gens.sort_by(|a, b| {
+            let cross = a[0] * b[1] - a[1] * b[0];
+            // `>`/`<`, not `total_cmp`, so that -0.0 and 0.0 both count as parallel.
+            if cross > 0.0 {
+                core::cmp::Ordering::Less
+            } else if cross < 0.0 {
+                core::cmp::Ordering::Greater
+            } else {
+                core::cmp::Ordering::Equal
+            }
+        });
 
         // Start at the lowest vertex, c − Σ g, then go up the right side and down the left.
         let mut p = [self.center[0], self.center[1]];
