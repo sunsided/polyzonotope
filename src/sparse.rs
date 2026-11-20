@@ -7,6 +7,7 @@ use portable_atomic::{AtomicU64, Ordering};
 
 use nalgebra::{DMatrix, DVector};
 
+mod decide;
 mod hull;
 
 use crate::reduce::{self, Reduction};

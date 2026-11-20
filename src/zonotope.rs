@@ -6,7 +6,7 @@ use nalgebra::{DMatrix, DVector};
 
 use crate::reduce::{self, Reduction};
 use crate::round::{self, RowErrors};
-use crate::{Interval, IntervalBox, hcat};
+use crate::{Containment, Intersection, Interval, IntervalBox, Polytope, SparsePolyZonotope, hcat};
 
 /// `Z = { c + G β | β ∈ [-1, 1]^m }`.
 #[derive(Clone, Debug, PartialEq)]
@@ -170,6 +170,30 @@ impl Zonotope {
             &hcat(&g.select_columns(&kept), &enclosure),
             &errs,
         )
+    }
+
+    /// Whether the zonotope meets the polytope `p`; see
+    /// [`SparsePolyZonotope::intersection`]. Against a single halfspace the
+    /// answer is definite without any splits, up to rounding at the boundary.
+    ///
+    /// # Panics
+    ///
+    /// Panics if a facet normal does not have the zonotope's dimension.
+    #[must_use]
+    pub fn intersection(&self, p: &Polytope, max_splits: usize) -> Intersection {
+        SparsePolyZonotope::from_zonotope(self).intersection(p, max_splits)
+    }
+
+    /// Whether the zonotope lies inside the polytope `p`; see
+    /// [`SparsePolyZonotope::containment`]. The answer is definite without
+    /// any splits, up to rounding at the boundary.
+    ///
+    /// # Panics
+    ///
+    /// Panics if a facet normal does not have the zonotope's dimension.
+    #[must_use]
+    pub fn containment(&self, p: &Polytope, max_splits: usize) -> Containment {
+        SparsePolyZonotope::from_zonotope(self).containment(p, max_splits)
     }
 
     /// Tight interval enclosure (rounded outward with the `sound` feature).
