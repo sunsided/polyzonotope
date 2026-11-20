@@ -31,7 +31,8 @@ impl SparsePolyZonotope {
     /// bound is within `tol` of a point of the set, or `max_splits` splits per
     /// bound are spent. The result is always sound and never wider than
     /// [`interval_hull`](Self::interval_hull); `tol` and `max_splits` only
-    /// trade tightness for time.
+    /// trade tightness for time. Factors with an exponent above the limit of
+    /// [`split`](Self::split) are never split, so this never panics.
     #[must_use]
     pub fn interval_hull_split(&self, tol: f64, max_splits: usize) -> IntervalBox {
         let coarse = self.interval_hull();
@@ -143,7 +144,8 @@ impl SparsePolyZonotope {
     }
 
     /// The factor whose monomials weigh most in dimension `dim`, by
-    /// `Σ_j |G[dim, j]| E[k, j]`; `None` if no monomial depends on a factor.
+    /// `Σ_j |G[dim, j]| E[k, j]`; `None` if no monomial depends on a factor
+    /// that [`split`](Self::split) accepts.
     fn heaviest_factor(&self, dim: usize) -> Option<crate::FactorId> {
         let (g, e) = (self.dependent_generators(), self.exponents());
         let weight = |k: usize| -> f64 {
@@ -154,7 +156,7 @@ impl SparsePolyZonotope {
 
         (0..self.ids().len())
             .map(|k| (k, weight(k)))
-            .filter(|&(_, w)| w > 0.0)
+            .filter(|&(k, w)| w > 0.0 && self.can_split(k))
             .max_by(|a, b| a.1.total_cmp(&b.1))
             .map(|(k, _)| self.ids()[k])
     }

@@ -220,3 +220,12 @@ fn zonotope_box_intersection() {
         Intersection::Disjoint
     );
 }
+
+/// A factor with an exponent beyond the split limit is left whole instead of
+/// panicking, and the result is the plain hull.
+#[test]
+fn split_hull_skips_unsplittable_factors() {
+    let pz = power(57);
+
+    assert_eq!(pz.interval_hull_split(1e-6, 10), pz.interval_hull());
+}
