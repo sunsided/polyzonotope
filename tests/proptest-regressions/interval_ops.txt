@@ -1,0 +1,8 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc cc71ac235f17e29ed01150de2a7da7b27e2b8a3d025665a5c11298d0df0a85e4 # shrinks to a = Interval { lo: 0.0, hi: 0.0 }, b = Interval { lo: -3.7278643885423057, hi: -1.9196340908537242 }, s = 0.0, t = 0.0
+cc e2888f9d7477490a7445b09c5842a4e1799b5bb81e458bbb32f8865e8f38fe18 # shrinks to pz = SparsePolyZonotope { c: VecStorage { data: [-3.0688264599845927], nrows: Dyn(1), ncols: Const }, g: VecStorage { data: [], nrows: Dyn(1), ncols: Dyn(0) }, gi: VecStorage { data: [], nrows: Dyn(1), ncols: Dyn(0) }, e: VecStorage { data: [], nrows: Dyn(1), ncols: Dyn(0) }, id: [FactorId(65)] }, (m, picks) = (IntervalMatrix(VecStorage { data: [Interval { lo: 0.0, hi: 0.09839107176759739 }, Interval { lo: 0.0, hi: 0.0 }, Interval { lo: 0.0, hi: 0.0 }, Interval { lo: 0.0, hi: 0.0 }, Interval { lo: 0.0, hi: 0.0 }, Interval { lo: 0.0, hi: 0.0 }, Interval { lo: 0.0, hi: 0.0 }, Interval { lo: 0.0, hi: 0.0 }, Interval { lo: 0.0, hi: 0.0 }], nrows: Dyn(3), ncols: Dyn(3) }), [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]), samples = [Sample { alpha: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], beta: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0] }]

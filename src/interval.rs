@@ -46,6 +46,12 @@ impl Interval {
         self.hi - self.lo
     }
 
+    /// Largest absolute value in the interval, `max(|lo|, |hi|)`; exact.
+    #[must_use]
+    pub fn mag(&self) -> f64 {
+        self.lo.abs().max(self.hi.abs())
+    }
+
     /// Whether `x` lies in the interval widened by `tol` on both sides.
     #[must_use]
     pub fn contains(&self, x: f64, tol: f64) -> bool {
@@ -87,5 +93,60 @@ impl IntervalBox {
                 .iter()
                 .zip(p.iter())
                 .all(|(iv, &x)| iv.contains(x, tol))
+    }
+}
+
+impl core::ops::Neg for Interval {
+    type Output = Interval;
+
+    /// `{ -a | a ∈ self }`, which is `[-hi, -lo]`; exact.
+    fn neg(self) -> Interval {
+        Interval {
+            lo: -self.hi,
+            hi: -self.lo,
+        }
+    }
+}
+
+impl core::ops::Sub for Interval {
+    type Output = Interval;
+
+    /// `{ a - b | a ∈ self, b ∈ o }`, which is `[lo - o.hi, hi - o.lo]`.
+    ///
+    /// With the `sound` feature the bounds are rounded outward.
+    fn sub(self, o: Interval) -> Interval {
+        self + (-o)
+    }
+}
+
+impl core::ops::Mul for Interval {
+    type Output = Interval;
+
+    /// `{ a · b | a ∈ self, b ∈ o }`, from the extreme corner products.
+    ///
+    /// With the `sound` feature the bounds are rounded outward.
+    fn mul(self, o: Interval) -> Interval {
+        let (lo, hi) = round::mul_bounds((self.lo, self.hi), (o.lo, o.hi));
+        Interval { lo, hi }
+    }
+}
+
+impl core::ops::Div for Interval {
+    type Output = Interval;
+
+    /// `{ a / b | a ∈ self, b ∈ o }`.
+    ///
+    /// With the `sound` feature the bounds are rounded outward.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the divisor contains zero.
+    fn div(self, o: Interval) -> Interval {
+        assert!(
+            o.lo > 0.0 || o.hi < 0.0,
+            "interval division by an interval containing zero"
+        );
+        let (lo, hi) = round::div_bounds((self.lo, self.hi), (o.lo, o.hi));
+        Interval { lo, hi }
     }
 }

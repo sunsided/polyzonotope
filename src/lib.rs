@@ -8,6 +8,7 @@ extern crate std;
 
 mod constrained;
 mod interval;
+mod interval_matrix;
 mod polytope;
 mod reduce;
 mod round;
@@ -16,6 +17,7 @@ mod zonotope;
 
 pub use constrained::ConstrainedPolyZonotope;
 pub use interval::{Interval, IntervalBox};
+pub use interval_matrix::IntervalMatrix;
 pub use polytope::{Containment, Halfspace, Intersection, Polytope};
 pub use reduce::Reduction;
 pub use sparse::{FactorId, ShapeError, SparsePolyZonotope};

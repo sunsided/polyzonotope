@@ -10,9 +10,10 @@ use nalgebra::{DMatrix, DVector};
 mod decide;
 mod hull;
 
+use crate::interval_matrix::uncertainty_generators;
 use crate::reduce::{self, Reduction};
 use crate::round::{self, RowErrors};
-use crate::{Interval, IntervalBox, Zonotope, from_column_list, hcat};
+use crate::{Interval, IntervalBox, IntervalMatrix, Zonotope, from_column_list, hcat};
 
 /// Global identifier of a dependent factor `α_k`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -275,6 +276,26 @@ impl SparsePolyZonotope {
             gi: hcat(&gi, &errs.generators()),
             e: self.e.clone(),
             id: self.id.clone(),
+        }
+    }
+
+    /// Enclosure of `{ M x | M ∈ m, x ∈ PZ }` for an interval matrix `m`:
+    /// the exact map by the center matrix, plus independent generators for the
+    /// radius, sized by the interval hull of the set. Dependencies on the
+    /// factors survive through the center map.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `m` does not have one column per dimension.
+    #[must_use]
+    pub fn interval_map(&self, m: &IntervalMatrix) -> Self {
+        let (center, radius) = m.center_radius();
+        let spread = uncertainty_generators(&radius, &self.interval_hull());
+        let mapped = self.linear_map(&center);
+
+        Self {
+            gi: hcat(&mapped.gi, &spread),
+            ..mapped
         }
     }
 

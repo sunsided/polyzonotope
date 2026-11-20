@@ -4,9 +4,13 @@ use alloc::vec::Vec;
 
 use nalgebra::{DMatrix, DVector};
 
+use crate::interval_matrix::uncertainty_generators;
 use crate::reduce::{self, Reduction};
 use crate::round::{self, RowErrors};
-use crate::{Containment, Intersection, Interval, IntervalBox, Polytope, SparsePolyZonotope, hcat};
+use crate::{
+    Containment, Intersection, Interval, IntervalBox, IntervalMatrix, Polytope, SparsePolyZonotope,
+    hcat,
+};
 
 /// `Z = { c + G β | β ∈ [-1, 1]^m }`.
 #[derive(Clone, Debug, PartialEq)]
@@ -127,6 +131,22 @@ impl Zonotope {
         let c = round::vec_add(&self.center, v, &mut errs);
 
         Self::with_errors(c, &self.generators, &errs)
+    }
+
+    /// Enclosure of `{ M x | M ∈ m, x ∈ Z }` for an interval matrix `m`:
+    /// the map by the center matrix, plus a box for the radius, sized by the
+    /// interval hull of `Z`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `m` does not have one column per dimension.
+    #[must_use]
+    pub fn interval_map(&self, m: &IntervalMatrix) -> Self {
+        let (center, radius) = m.center_radius();
+        let spread = uncertainty_generators(&radius, &self.interval_hull());
+        let mapped = self.linear_map(&center);
+
+        Self::new(mapped.center, hcat(&mapped.generators, &spread))
     }
 
     /// Exact Minkowski sum `{ x + y | x ∈ self, y ∈ o }`: centers add, generators concatenate.
