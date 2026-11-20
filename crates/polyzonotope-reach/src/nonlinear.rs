@@ -32,6 +32,7 @@ use crate::{Dynamics, LinearReach, LinearSystem, ReachError, ReachFailure, Step}
 
 mod error;
 mod polynomialization;
+mod split;
 
 #[cfg(test)]
 mod ablation;
@@ -77,6 +78,13 @@ pub struct NonlinearSettings {
     pub max_pieces: usize,
     /// The abstraction of each step.
     pub method: Method,
+    /// How much larger than the two pieces' interval hulls together the
+    /// hull of their merged enclosure may be, by volume, as a fraction (0.1
+    /// allows 10%), for [`reach`](NonlinearReach::reach) to merge them into
+    /// one piece for the next step. Non-negative. A merge is also never
+    /// wider than half the narrowest piece that diverged so far, so splits
+    /// are not undone while the pieces are still too large to step whole.
+    pub merge_tolerance: f64,
     /// Highest total degree the static error of
     /// [`Method::Polynomialization`] keeps exact, at least 1. It is
     /// quadratic in the set, so without a cap the degree of the sets would
@@ -87,8 +95,8 @@ pub struct NonlinearSettings {
 
 impl NonlinearSettings {
     /// Defaults for time step `step`: 4 Taylor terms, order 20, 10
-    /// iterations, 10% widening, up to 8 pieces, linearization, and degree
-    /// 4 for polynomialization.
+    /// iterations, 10% widening, up to 8 pieces merged within 10%,
+    /// linearization, and degree 4 for polynomialization.
     #[must_use]
     pub fn new(step: f64) -> Self {
         Self {
@@ -99,6 +107,7 @@ impl NonlinearSettings {
             enlarge: 0.1,
             max_pieces: 8,
             method: Method::Linearization,
+            merge_tolerance: 0.1,
             max_degree: 4,
         }
     }
@@ -162,7 +171,8 @@ impl<D: Dynamics> NonlinearReach<D> {
     /// # Panics
     ///
     /// Panics if the step is not positive and finite, the order is below 1,
-    /// `enlarge` is negative, or `max_pieces` or `max_degree` is zero.
+    /// `enlarge` or `merge_tolerance` is negative, or `max_pieces` or
+    /// `max_degree` is zero.
     #[must_use]
     pub fn new(dynamics: D, settings: NonlinearSettings) -> Self {
         assert!(
@@ -171,6 +181,10 @@ impl<D: Dynamics> NonlinearReach<D> {
         );
         assert!(settings.order >= 1.0, "order must be at least 1");
         assert!(settings.enlarge >= 0.0, "enlarge must not be negative");
+        assert!(
+            settings.merge_tolerance >= 0.0,
+            "merge_tolerance must not be negative"
+        );
         assert!(settings.max_pieces >= 1, "max_pieces must be at least 1");
         assert!(settings.max_degree >= 1, "max_degree must be at least 1");
 
@@ -342,10 +356,13 @@ impl<D: Dynamics> NonlinearReach<D> {
     /// step `k`, whose union encloses the reachable set over
     /// `[k r, (k + 1) r]`.
     ///
-    /// A piece whose step diverges is enclosed in an oriented box, split in
-    /// two along its longest axis and retried, as long as the step stays
-    /// within `max_pieces`.
-    /// The pieces stay separate for the rest of the horizon.
+    /// A piece whose step diverges is split in two and retried, as long as
+    /// the step stays within `max_pieces`. The split cuts one factor of the
+    /// piece, keeping its dependencies, or one axis of its oriented box,
+    /// whichever leaves halves with the smaller second-order error bound.
+    /// After each step, pieces whose merged enclosure is within
+    /// `merge_tolerance` of their hulls, and no wider than half the
+    /// narrowest piece that diverged so far, become one piece again.
     ///
     /// # Errors
     ///
@@ -363,8 +380,9 @@ impl<D: Dynamics> NonlinearReach<D> {
     ) -> Result<Vec<Vec<Step>>, ReachFailure> {
         let mut pieces = vec![x0.clone()];
         let mut flowpipe = Vec::with_capacity(steps);
+        let mut diverged = f64::INFINITY;
         for _ in 0..steps {
-            let next = match self.advance(pieces, u) {
+            let (next, narrowest) = match self.advance(pieces, u) {
                 Ok(next) => next,
                 Err(error) => {
                     return Err(ReachFailure {
@@ -373,7 +391,8 @@ impl<D: Dynamics> NonlinearReach<D> {
                     });
                 }
             };
-            pieces = next.iter().map(|s| s.time_point.clone()).collect();
+            diverged = diverged.min(narrowest);
+            pieces = self.next_pieces(&next, 0.5 * diverged);
             flowpipe.push(next);
         }
 
@@ -429,31 +448,73 @@ impl<D: Dynamics> NonlinearReach<D> {
         Zonotope::new(DVector::zeros(0), DMatrix::zeros(0, 0))
     }
 
-    /// One step for every piece in `todo`, splitting pieces that diverge.
+    /// One step for every piece in `todo`, splitting pieces that diverge,
+    /// with the width (see [`split::width`]) of the narrowest piece that
+    /// diverged, infinite if none did.
     fn advance(
         &self,
         mut todo: Vec<SparsePolyZonotope>,
         u: &Zonotope,
-    ) -> Result<Vec<Step>, ReachError> {
+    ) -> Result<(Vec<Step>, f64), ReachError> {
         let mut done = Vec::with_capacity(todo.len());
+        let mut narrowest = f64::INFINITY;
         while let Some(piece) = todo.pop() {
             match self.step(&piece, u) {
                 Ok(step) => done.push(step),
                 Err(ReachError::AbstractionDiverged)
                     if done.len() + todo.len() + 2 <= self.settings.max_pieces =>
                 {
-                    let halves = halves(&piece);
-                    if halves.len() < 2 {
-                        return Err(ReachError::AbstractionDiverged);
-                    }
-
-                    todo.extend(halves);
+                    narrowest = narrowest.min(split::width(&piece));
+                    let (lower, upper) = split::halves(&piece, |p| self.curvature(p, u))
+                        .ok_or(ReachError::AbstractionDiverged)?;
+                    todo.push(lower);
+                    todo.push(upper);
                 }
                 Err(e) => return Err(e),
             }
         }
 
-        Ok(done)
+        Ok((done, narrowest))
+    }
+
+    /// `Σ_i |r|ᵀ |H_i| |r|`, with `r` the radius of the hull of `x × u` and
+    /// `H_i` the Hessians over it: a bound on the second-order error of a
+    /// linearization of `x`, the size that splitting has to bring down.
+    /// Plain `f64`, since it only ranks candidate splits; infinite if the
+    /// Hessians overflow.
+    fn curvature(&self, x: &SparsePolyZonotope, u: &Zonotope) -> f64 {
+        let region: Vec<Interval> = x
+            .interval_hull()
+            .0
+            .into_iter()
+            .chain(u.interval_hull().0)
+            .collect();
+        let radius: Vec<f64> = region.iter().map(|iv| 0.5 * iv.width()).collect();
+        let w = radius.len();
+        let bound: f64 = self
+            .dynamics
+            .hessians(&region)
+            .iter()
+            .flat_map(|h| {
+                let radius = &radius;
+                (0..w).flat_map(move |a| {
+                    (0..w).map(move |b| h.0[(a, b)].mag() * radius[a] * radius[b])
+                })
+            })
+            .sum();
+
+        if bound.is_nan() { f64::INFINITY } else { bound }
+    }
+
+    /// The start sets of the next step: the time-point sets of `steps`,
+    /// with pairs merged where [`merge_tolerance`](NonlinearSettings::merge_tolerance)
+    /// allows and the merge is no wider than `cap`.
+    fn next_pieces(&self, steps: &[Step], cap: f64) -> Vec<SparsePolyZonotope> {
+        let pieces = steps.iter().map(|s| s.time_point.clone()).collect();
+        split::merge(pieces, self.settings.merge_tolerance, cap, |merged| {
+            polynomialization::cap_degree(merged, self.settings.max_degree)
+                .reduce(self.settings.order, Reduction::Girard)
+        })
     }
 
     /// The linear model around `z* = (x* , c_u)`, where `x*` is the middle
@@ -557,14 +618,6 @@ impl Terms {
 /// Whether every bound in `intervals` is finite (and so not NaN either).
 fn all_finite<'a>(mut intervals: impl Iterator<Item = &'a Interval>) -> bool {
     intervals.all(|iv| iv.lo.is_finite() && iv.hi.is_finite())
-}
-
-/// `piece` in two: its oriented box (PCA reduction to order 1), halved
-/// along the longest axis. Splitting one factor of a set with many barely
-/// shrinks it; the box loses the dependencies but halves the width.
-fn halves(piece: &SparsePolyZonotope) -> Vec<SparsePolyZonotope> {
-    let oriented = piece.reduce(1.0, Reduction::Pca).to_zonotope();
-    SparsePolyZonotope::from_zonotope(&oriented).split_pieces(1)
 }
 
 /// Point intervals for `values`.

@@ -395,6 +395,30 @@ both_methods!(cubic_drift, cubic_drift_is_contained);
 both_methods!(oversized, oversized_set_is_refused);
 both_methods!(overflow, overflow_is_refused);
 both_methods!(bilinear, bilinear_input_is_contained);
+both_methods!(merging, pieces_merge_as_the_set_contracts);
+
+/// `x₀' = −x₀ − x₀³`, `x₁' = −x₁ + ½ x₀²` from a wide box: the cubic forces
+/// splits early on, and the contraction toward the origin later lets the
+/// pieces merge again. The merged sets still hold every trajectory.
+fn pieces_merge_as_the_set_contracts(method: Method) {
+    /// The vector field in plain `f64`.
+    fn damped(x: &DVector<f64>, _: f64) -> DVector<f64> {
+        DVector::from_vec(vec![-x[0] - x[0].powi(3), -x[1] + 0.5 * x[0] * x[0]])
+    }
+
+    let dynamics = Polynomial::new(2, 1)
+        .term(0, -1.0, &[1, 0, 0])
+        .term(0, -1.0, &[3, 0, 0])
+        .term(1, -1.0, &[0, 1, 0])
+        .term(1, 0.5, &[2, 0, 0]);
+    let flowpipe = NonlinearReach::new(dynamics, sharp(0.1, method))
+        .reach(&initial_box(&[0.0, 0.0], 1.0), &input(0.0), 40)
+        .expect("splitting carries the set");
+    let counts: Vec<usize> = flowpipe.iter().map(Vec::len).collect();
+    assert!(counts.iter().any(|&c| c > 1), "{counts:?}");
+    assert!(counts.windows(2).any(|w| w[1] < w[0]), "{counts:?}");
+    check_trajectories(damped, &flowpipe, (&[0.0, 0.0], 1.0, 0.0), 0.1, 24);
+}
 
 /// `x₀' = x₁`, `x₁' = −x₀ − x₀ u`: a spring whose stiffness the input
 /// modulates. `∂²f/∂x∂u ≠ 0`, so the error has a part from the input
