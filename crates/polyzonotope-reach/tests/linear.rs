@@ -115,8 +115,14 @@ fn step(
 ) -> Option<Step> {
     match LinearReach::new(sys.clone(), r, terms) {
         Ok(reach) => Some(reach.step(x, u)),
-        Err(ReachError::StepTooLarge) => None,
-        Err(ReachError::InvalidStep) => unreachable!("test steps are positive"),
+        Err(e) => {
+            assert_eq!(
+                e,
+                ReachError::StepTooLarge,
+                "test steps are positive, so the only error of LinearReach::new"
+            );
+            None
+        }
     }
 }
 
