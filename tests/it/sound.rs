@@ -150,6 +150,18 @@ proptest! {
     }
 }
 
+proptest! {
+    /// Interval products of points enclose the exact product.
+    #[test]
+    fn interval_product_is_rounded_outward(a in 1.0..1e3f64, b in 1.0..1e3f64) {
+        let p = Interval::point(a) * Interval::point(b);
+        let (hi, lo) = two_product(a, b);
+
+        prop_assert!(p.lo < hi || (p.lo <= hi && lo >= 0.0));
+        prop_assert!(p.hi > hi || (p.hi >= hi && lo <= 0.0));
+    }
+}
+
 /// `3 · 0.1` rounds up in `f64`, so the plain center misses the exact product;
 /// the sound map adds an error generator that covers it.
 #[test]

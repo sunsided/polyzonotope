@@ -3,6 +3,7 @@
 mod constrained;
 mod cora;
 mod edge_cases;
+mod interval_ops;
 mod properties;
 #[cfg(feature = "sound")]
 mod sound;

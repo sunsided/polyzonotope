@@ -20,7 +20,7 @@ use sound as backend;
 #[cfg(not(feature = "sound"))]
 use plain as backend;
 
-pub(crate) use backend::{add_down, add_up, mid_rad, residual_bound};
+pub(crate) use backend::{add_down, add_up, div_bounds, mid_rad, mul_bounds, residual_bound};
 
 /// Outward-rounded arithmetic on top of [`inari`].
 #[cfg(feature = "sound")]
@@ -87,6 +87,23 @@ mod sound {
 
             acc.sup()
         })
+    }
+
+    /// The interval `[lo, hi]`.
+    fn closed(lo: f64, hi: f64) -> Interval {
+        Interval::try_from((lo, hi)).expect("interval bounds must be finite in sound mode")
+    }
+
+    /// Bounds of `[a.0, a.1] · [b.0, b.1]`, rounded outward.
+    pub(crate) fn mul_bounds(a: (f64, f64), b: (f64, f64)) -> (f64, f64) {
+        let p = closed(a.0, a.1) * closed(b.0, b.1);
+        (p.inf(), p.sup())
+    }
+
+    /// Bounds of `[a.0, a.1] / [b.0, b.1]` for a divisor without zero, rounded outward.
+    pub(crate) fn div_bounds(a: (f64, f64), b: (f64, f64)) -> (f64, f64) {
+        let q = closed(a.0, a.1) / closed(b.0, b.1);
+        (q.inf(), q.sup())
     }
 
     /// An upper bound of `a + b`.
@@ -156,6 +173,24 @@ mod plain {
     /// Zero: plain mode takes the computed `U` as exactly orthogonal.
     pub(crate) fn residual_bound(u: &DMatrix<f64>, _: &DVector<f64>) -> DVector<f64> {
         DVector::zeros(u.nrows())
+    }
+
+    /// Bounds of `[a.0, a.1] · [b.0, b.1]`: the extreme corner products.
+    pub(crate) fn mul_bounds(a: (f64, f64), b: (f64, f64)) -> (f64, f64) {
+        extremes([a.0 * b.0, a.0 * b.1, a.1 * b.0, a.1 * b.1])
+    }
+
+    /// Bounds of `[a.0, a.1] / [b.0, b.1]` for a divisor without zero.
+    pub(crate) fn div_bounds(a: (f64, f64), b: (f64, f64)) -> (f64, f64) {
+        extremes([a.0 / b.0, a.0 / b.1, a.1 / b.0, a.1 / b.1])
+    }
+
+    /// Smallest and largest of four values.
+    fn extremes(v: [f64; 4]) -> (f64, f64) {
+        (
+            v.iter().copied().fold(f64::INFINITY, f64::min),
+            v.iter().copied().fold(f64::NEG_INFINITY, f64::max),
+        )
     }
 
     /// `a + b`, taken as its own upper bound.
