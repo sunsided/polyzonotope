@@ -221,6 +221,25 @@ fn zonotope_box_intersection() {
     );
 }
 
+/// The unit square's polygon is its four corners, counter-clockwise from the bottom left.
+#[test]
+fn polygon_of_the_unit_square() {
+    let z = Zonotope::new(DVector::zeros(2), DMatrix::identity(2, 2));
+
+    assert_eq!(
+        z.polygon(),
+        vec![[-1.0, -1.0], [1.0, -1.0], [1.0, 1.0], [-1.0, 1.0]]
+    );
+}
+
+/// A zonotope without generators is drawn as its center.
+#[test]
+fn polygon_of_a_point() {
+    let z = Zonotope::new(DVector::from_vec(vec![1.0, 2.0]), DMatrix::zeros(2, 0));
+
+    assert_eq!(z.polygon(), vec![[1.0, 2.0]]);
+}
+
 /// A factor with an exponent beyond the split limit is left whole instead of
 /// panicking, and the result is the plain hull.
 #[test]

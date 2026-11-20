@@ -400,6 +400,42 @@ proptest! {
     }
 }
 
+proptest! {
+    /// Every sampled point of a 2-D zonotope lies inside its polygon, which is
+    /// convex and counter-clockwise: no point is right of any edge.
+    #[test]
+    fn polygon_contains_every_point(pz in arb_pz(), extra in arb_pz(), samples in arb_samples()) {
+        let pad2 = |v: &DVector<f64>| DVector::from_fn(2, |i, _| v[i % v.len()]);
+        let z = pz.to_zonotope();
+        let z = Zonotope::new(pad2(z.center()), DMatrix::from_fn(2, z.num_generators(), |i, j| {
+            z.generators()[(i % z.dim(), j)] + extra.center()[i % extra.dim()] * 0.1
+        }));
+        let poly = z.polygon();
+        for s in &samples {
+            let beta: Vec<f64> = (0..z.num_generators()).map(|j| s.beta[j % s.beta.len()]).collect();
+            let x = z.evaluate(&beta);
+            for (k, a) in poly.iter().enumerate() {
+                let b = poly[(k + 1) % poly.len()];
+                let cross = (b[0] - a[0]) * (x[1] - a[1]) - (b[1] - a[1]) * (x[0] - a[0]);
+                prop_assert!(cross >= -TOL * (1.0 + x.amax()) * (1.0 + (b[0] - a[0]).abs() + (b[1] - a[1]).abs()));
+            }
+        }
+    }
+
+    /// The pieces cover the set: every sampled point lies in the hull of a
+    /// piece, and there is one more piece than splits at most.
+    #[test]
+    fn split_pieces_cover_the_set(pz in arb_pz(), splits in 0usize..8, samples in arb_samples()) {
+        let pieces = pz.split_pieces(splits);
+        prop_assert!(pieces.len() <= splits + 1);
+        let hulls: Vec<IntervalBox> = pieces.iter().map(SparsePolyZonotope::interval_hull).collect();
+        for s in &samples {
+            let x = eval(&pz, s);
+            prop_assert!(hulls.iter().any(|h| h.contains(&x, TOL * (1.0 + x.amax()))));
+        }
+    }
+}
+
 /// The support function `max { dᵀ x | x ∈ Z } = dᵀ c + Σ |dᵀ gⱼ|`.
 fn support(z: &Zonotope, d: &DVector<f64>) -> f64 {
     d.dot(z.center())
