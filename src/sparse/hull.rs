@@ -81,7 +81,7 @@ impl SparsePolyZonotope {
             }
 
             let Some(factor) = pieces[worst].set.heaviest_factor(dim) else {
-                // No dependent factor left: the hull of this piece is exact in `dim`.
+                // No factor left that split accepts: this piece's bound stands.
                 break;
             };
             let piece = pieces.swap_remove(worst);

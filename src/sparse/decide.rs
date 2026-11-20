@@ -15,7 +15,8 @@ impl SparsePolyZonotope {
     /// point lies in `p` gives [`Intersection::Intersects`]; any other piece is
     /// split along its heaviest factor. At most `max_splits` splits are made
     /// in total. Factors with an exponent above the limit of
-    /// [`split`](Self::split) are never split; such pieces give `Unknown`.
+    /// [`split`](Self::split) are never split; a piece with no factor left
+    /// that `split` accepts gives `Unknown`.
     ///
     /// # Panics
     ///
