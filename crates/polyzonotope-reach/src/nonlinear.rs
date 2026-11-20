@@ -28,11 +28,14 @@ use alloc::vec::Vec;
 use nalgebra::{DMatrix, DVector};
 use polyzonotope::{Interval, IntervalBox, Reduction, SparsePolyZonotope, Zonotope};
 
-use crate::{Dynamics, LinearReach, LinearSystem, ReachError, ReachFailure, Step};
+use crate::{Dynamics, LinearReach, LinearSystem, ReachError, Step};
 
+mod driver;
 mod error;
 mod polynomialization;
 mod split;
+
+pub use driver::Adaptive;
 
 #[cfg(test)]
 mod ablation;
@@ -155,6 +158,32 @@ pub enum Splitting {
     Factors,
 }
 
+/// What becomes of the generators that order reduction and the linear step
+/// make independent.
+///
+/// Non-exhaustive: more restructurings may be added.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum Restructure {
+    /// They stay independent generators. Their products in the next step's
+    /// quadratic error are enclosed one by one, so a wide set loses its
+    /// shape step by step.
+    Off,
+    /// After each step's Girard reduction, every independent generator of
+    /// the time-point set becomes a dependent factor of its own. That is
+    /// exact (`g β` with `β ∈ [-1, 1]` is the monomial `g α` of a factor
+    /// nowhere else), and from then on the quadratic maps of later steps
+    /// treat it as a polynomial: `α²` stays non-negative and products
+    /// cancel. The default: on Van der Pol from radius 1 it proves 20
+    /// steps with polynomialization instead of 15, and 13 with
+    /// linearization instead of 8, at 2 to 3 times the cost per step. The
+    /// number of factors stays at most the number of generators, since
+    /// [`compact`](polyzonotope::SparsePolyZonotope::compact) drops the
+    /// unused ones.
+    #[default]
+    Lift,
+}
+
 /// How [`NonlinearReach`] steps through time.
 #[derive(Clone, Debug, PartialEq)]
 pub struct NonlinearSettings {
@@ -190,12 +219,19 @@ pub struct NonlinearSettings {
     /// double with every step; higher monomials are enclosed in independent
     /// generators.
     pub max_degree: u32,
+    /// Whether the time-point set's independent generators become
+    /// dependent factors before the next step.
+    pub restructure: Restructure,
+    /// Adaptive step lengths for [`reach`](NonlinearReach::reach) and
+    /// [`reach_for`](NonlinearReach::reach_for), starting from `step`; `None`
+    /// keeps every step at `step`.
+    pub adaptive: Option<Adaptive>,
 }
 
 impl NonlinearSettings {
     /// Defaults for time step `step`: 4 Taylor terms, order 20, 10
     /// iterations, 10% widening, up to 8 pieces from the cheapest splits,
-    /// merged within 10%,
+    /// merged within 10%, lifted generators, fixed steps,
     /// linearization, and degree 4 for polynomialization.
     #[must_use]
     pub fn new(step: f64) -> Self {
@@ -210,6 +246,8 @@ impl NonlinearSettings {
             method: Method::Linearization,
             merge_tolerance: 0.1,
             max_degree: 4,
+            restructure: Restructure::Lift,
+            adaptive: None,
         }
     }
 }
@@ -272,8 +310,10 @@ impl<D: Dynamics> NonlinearReach<D> {
     /// # Panics
     ///
     /// Panics if the step is not positive and finite, the order is below 1,
-    /// `enlarge` or `merge_tolerance` is negative, or `max_pieces` or
-    /// `max_degree` is zero.
+    /// `enlarge` or `merge_tolerance` is negative, `max_pieces` or
+    /// `max_degree` is zero, or, with [`Adaptive`] steps, `min_step` is not
+    /// positive, `max_step` not finite, `step` not in
+    /// `[min_step, max_step]`, `shrink` not in `(0, 1)` or `grow` below 1.
     #[must_use]
     pub fn new(dynamics: D, settings: NonlinearSettings) -> Self {
         assert!(
@@ -288,6 +328,9 @@ impl<D: Dynamics> NonlinearReach<D> {
         );
         assert!(settings.max_pieces >= 1, "max_pieces must be at least 1");
         assert!(settings.max_degree >= 1, "max_degree must be at least 1");
+        if let Some(adaptive) = &settings.adaptive {
+            adaptive.check(settings.step);
+        }
 
         Self { dynamics, settings }
     }
@@ -316,26 +359,31 @@ impl<D: Dynamics> NonlinearReach<D> {
     ///
     /// Panics if `x` does not have one row per state or `u` one per input.
     pub fn step(&self, x: &SparsePolyZonotope, u: &Zonotope) -> Result<Step, ReachError> {
-        self.step_with(x, u, Terms::ALL)
+        let attempt = Attempt {
+            step: self.settings.step,
+            terms: Terms::ALL,
+        };
+        self.step_with(x, u, attempt).map(|(step, _)| step)
     }
 
-    /// [`step`](Self::step) with only the error terms in `terms`; the tests
-    /// drop one at a time to show that each is needed.
+    /// [`step`](Self::step) with the step length and error terms of
+    /// `attempt`, and how many error guesses it took; the tests drop one term
+    /// at a time to show that each is needed.
     fn step_with(
         &self,
         x: &SparsePolyZonotope,
         u: &Zonotope,
-        terms: Terms,
-    ) -> Result<Step, ReachError> {
+        attempt: Attempt,
+    ) -> Result<(Step, usize), ReachError> {
         assert_eq!(x.dim(), self.dynamics.states(), "x needs one row per state");
         assert_eq!(u.dim(), self.dynamics.inputs(), "u needs one row per input");
 
         let model = self
-            .linearize(x, u)
+            .linearize(x, u, attempt.step)
             .ok_or(ReachError::AbstractionDiverged)?;
         match self.settings.method {
-            Method::Linearization => self.step_linearized(x, u, &model, terms),
-            Method::Polynomialization => self.step_polynomialized(x, u, &model, terms),
+            Method::Linearization => self.step_linearized(x, u, &model, attempt),
+            Method::Polynomialization => self.step_polynomialized(x, u, &model, attempt),
         }
     }
 
@@ -346,23 +394,24 @@ impl<D: Dynamics> NonlinearReach<D> {
         x: &SparsePolyZonotope,
         u: &Zonotope,
         model: &Linearization,
-        terms: Terms,
-    ) -> Result<Step, ReachError> {
+        attempt: Attempt,
+    ) -> Result<(Step, usize), ReachError> {
         let n = self.dynamics.states();
         let system = LinearSystem {
             a: model.a.clone(),
             b: DMatrix::identity(n, n),
         };
-        let linear = LinearReach::new(system, self.settings.step, self.settings.taylor_terms)?;
+        let linear = LinearReach::new(system, attempt.step, self.settings.taylor_terms)?;
         let known = u.linear_map(&model.b);
 
-        self.confirm(n, |assumed| {
+        self.confirm(n, attempt.step, |assumed| {
             let step = linear.step(x, &with_error(&known, &model.offset, assumed));
             let states = step
                 .time_interval
                 .reduce(self.settings.order, Reduction::Girard);
-            let actual = error::abstraction_error(&self.dynamics, model, (&states, u), terms)
-                .ok_or(ReachError::AbstractionDiverged)?;
+            let actual =
+                error::abstraction_error(&self.dynamics, model, (&states, u), attempt.terms)
+                    .ok_or(ReachError::AbstractionDiverged)?;
 
             Ok((step.time_point, states, actual))
         })
@@ -377,12 +426,12 @@ impl<D: Dynamics> NonlinearReach<D> {
         x: &SparsePolyZonotope,
         u: &Zonotope,
         model: &Linearization,
-        terms: Terms,
-    ) -> Result<Step, ReachError> {
+        attempt: Attempt,
+    ) -> Result<(Step, usize), ReachError> {
         let n = self.dynamics.states();
         let limits = (self.settings.max_degree, self.settings.order);
         let expansion = polynomialization::static_error(&self.dynamics, model, x, limits)?;
-        let start = if terms.has(Term::StaticSet) {
+        let start = if attempt.terms.has(Term::StaticSet) {
             x.cartesian_product(&expansion.static_set)
         } else {
             x.cartesian_product(&SparsePolyZonotope::from_zonotope(&Zonotope::new(
@@ -391,10 +440,10 @@ impl<D: Dynamics> NonlinearReach<D> {
             )))
         };
         let system = polynomialization::augmented_system(&model.a);
-        let linear = LinearReach::new(system, self.settings.step, self.settings.taylor_terms)?;
+        let linear = LinearReach::new(system, attempt.step, self.settings.taylor_terms)?;
         let known = u.linear_map(&model.b);
 
-        self.confirm(n, |assumed| {
+        self.confirm(n, attempt.step, |assumed| {
             let step = linear.step(&start, &with_error(&known, &model.offset, assumed));
             let states = polynomialization::project(&step.time_interval, n)
                 .reduce(self.settings.order, Reduction::Girard);
@@ -402,8 +451,8 @@ impl<D: Dynamics> NonlinearReach<D> {
                 &self.dynamics,
                 (model, &expansion),
                 (&states, u),
-                self.settings.step,
-                terms,
+                attempt.step,
+                attempt.terms,
             )?;
 
             Ok((
@@ -414,11 +463,23 @@ impl<D: Dynamics> NonlinearReach<D> {
         })
     }
 
+    /// `set` reduced to the configured order, as the start of the next step,
+    /// with its independent generators lifted to factors under
+    /// [`Restructure::Lift`].
+    fn restructure(&self, set: &SparsePolyZonotope) -> SparsePolyZonotope {
+        let reduced = set.reduce(self.settings.order, Reduction::Girard);
+        match self.settings.restructure {
+            Restructure::Off => reduced,
+            Restructure::Lift => split::lift_independent(&reduced),
+        }
+    }
+
     /// The guess-and-check loop: `attempt` runs the step with the error
     /// guess `Ψ̄` and returns the time-point set, the reduced time-interval
     /// set and the error over it. The first attempt whose error lies in its
-    /// guess is accepted; otherwise the guess widens, up to
-    /// `max_iterations` times.
+    /// guess is accepted, with the number of guesses it took; otherwise the
+    /// guess widens, up to `max_iterations` times. `step` is the length of
+    /// the step, recorded in the result.
     ///
     /// # Errors
     ///
@@ -427,21 +488,24 @@ impl<D: Dynamics> NonlinearReach<D> {
     fn confirm(
         &self,
         n: usize,
+        step: f64,
         mut attempt: impl FnMut(
             &[Interval],
         ) -> Result<
             (SparsePolyZonotope, SparsePolyZonotope, Vec<Interval>),
             ReachError,
         >,
-    ) -> Result<Step, ReachError> {
+    ) -> Result<(Step, usize), ReachError> {
         let mut assumed = vec![Interval::point(0.0); n];
-        for _ in 0..self.settings.max_iterations {
+        for guesses in 1..=self.settings.max_iterations {
             let (time_point, time_interval, actual) = attempt(&assumed)?;
             if encloses(&assumed, &actual) {
-                return Ok(Step {
-                    time_point: time_point.reduce(self.settings.order, Reduction::Girard),
+                let step = Step {
+                    time_point: self.restructure(&time_point),
                     time_interval,
-                });
+                    duration: step,
+                };
+                return Ok((step, guesses));
             }
 
             assumed = widen(&assumed, &actual, self.settings.enlarge);
@@ -453,177 +517,10 @@ impl<D: Dynamics> NonlinearReach<D> {
         Err(ReachError::AbstractionDiverged)
     }
 
-    /// `steps` consecutive steps from `x0`: entry `k` holds the pieces of
-    /// step `k`, whose union encloses the reachable set over
-    /// `[k r, (k + 1) r]`.
-    ///
-    /// A piece whose step diverges is split in two and retried, as long as
-    /// the step stays within `max_pieces`. The split cuts one factor of the
-    /// piece, keeping its dependencies, or (unless
-    /// [`Splitting::Factors`]) one axis of its oriented box, whichever
-    /// leaves halves with the smaller second-order error bound.
-    /// After each step, pieces whose merged enclosure is within
-    /// `merge_tolerance` of their hulls, and no wider than half the
-    /// narrowest piece that diverged so far, become one piece again.
-    ///
-    /// # Errors
-    ///
-    /// A [`ReachFailure`] with the first error of [`step`](Self::step) that
-    /// splitting could not avoid, and every step proven before it.
-    ///
-    /// # Panics
-    ///
-    /// Panics if `x0` does not have one row per state or `u` one per input.
-    pub fn reach(
-        &self,
-        x0: &SparsePolyZonotope,
-        u: &Zonotope,
-        steps: usize,
-    ) -> Result<Vec<Vec<Step>>, ReachFailure> {
-        let mut pieces = vec![x0.clone()];
-        let mut flowpipe = Vec::with_capacity(steps);
-        let mut diverged = f64::INFINITY;
-        for _ in 0..steps {
-            let (next, narrowest) = match self.advance(pieces, u) {
-                Ok(next) => next,
-                Err(error) => {
-                    return Err(ReachFailure {
-                        proven: flowpipe,
-                        error,
-                    });
-                }
-            };
-            diverged = diverged.min(narrowest);
-            pieces = self.next_pieces(&next, 0.5 * diverged);
-            flowpipe.push(next);
-        }
-
-        Ok(flowpipe)
-    }
-
-    /// [`step`](Self::step) for an autonomous system `x' = f(x)`, without
-    /// building the zero-dimensional input set.
-    ///
-    /// # Errors
-    ///
-    /// As for [`step`](Self::step).
-    ///
-    /// # Panics
-    ///
-    /// Panics if the dynamics have inputs, or `x` does not have one row per
-    /// state.
-    pub fn step_autonomous(&self, x: &SparsePolyZonotope) -> Result<Step, ReachError> {
-        self.step(x, &self.no_input())
-    }
-
-    /// [`reach`](Self::reach) for an autonomous system `x' = f(x)`, without
-    /// building the zero-dimensional input set.
-    ///
-    /// # Errors
-    ///
-    /// As for [`reach`](Self::reach).
-    ///
-    /// # Panics
-    ///
-    /// Panics if the dynamics have inputs, or `x0` does not have one row per
-    /// state.
-    pub fn reach_autonomous(
-        &self,
-        x0: &SparsePolyZonotope,
-        steps: usize,
-    ) -> Result<Vec<Vec<Step>>, ReachFailure> {
-        self.reach(x0, &self.no_input(), steps)
-    }
-
-    /// The zero-dimensional input set of an autonomous system.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the dynamics have inputs: dropping them silently would
-    /// compute the sets for `u = 0` only.
-    fn no_input(&self) -> Zonotope {
-        assert_eq!(
-            self.dynamics.inputs(),
-            0,
-            "an autonomous step needs dynamics without inputs"
-        );
-        Zonotope::new(DVector::zeros(0), DMatrix::zeros(0, 0))
-    }
-
-    /// One step for every piece in `todo`, splitting pieces that diverge,
-    /// with the width (see [`split::width`]) of the narrowest piece that
-    /// diverged, infinite if none did.
-    fn advance(
-        &self,
-        mut todo: Vec<SparsePolyZonotope>,
-        u: &Zonotope,
-    ) -> Result<(Vec<Step>, f64), ReachError> {
-        let mut done = Vec::with_capacity(todo.len());
-        let mut narrowest = f64::INFINITY;
-        while let Some(piece) = todo.pop() {
-            match self.step(&piece, u) {
-                Ok(step) => done.push(step),
-                Err(ReachError::AbstractionDiverged)
-                    if done.len() + todo.len() + 2 <= self.settings.max_pieces =>
-                {
-                    narrowest = narrowest.min(split::width(&piece));
-                    let (lower, upper) =
-                        split::halves(&piece, |p| self.curvature(p, u), self.settings.splitting)
-                            .ok_or(ReachError::AbstractionDiverged)?;
-                    todo.push(lower);
-                    todo.push(upper);
-                }
-                Err(e) => return Err(e),
-            }
-        }
-
-        Ok((done, narrowest))
-    }
-
-    /// `Σ_i |r|ᵀ |H_i| |r|`, with `r` the radius of the hull of `x × u` and
-    /// `H_i` the Hessians over it: a bound on the second-order error of a
-    /// linearization of `x`, the size that splitting has to bring down.
-    /// Plain `f64`, since it only ranks candidate splits; infinite if the
-    /// Hessians overflow.
-    fn curvature(&self, x: &SparsePolyZonotope, u: &Zonotope) -> f64 {
-        let region: Vec<Interval> = x
-            .interval_hull()
-            .0
-            .into_iter()
-            .chain(u.interval_hull().0)
-            .collect();
-        let radius: Vec<f64> = region.iter().map(|iv| 0.5 * iv.width()).collect();
-        let w = radius.len();
-        let bound: f64 = self
-            .dynamics
-            .hessians(&region)
-            .iter()
-            .flat_map(|h| {
-                let radius = &radius;
-                (0..w).flat_map(move |a| {
-                    (0..w).map(move |b| h.0[(a, b)].mag() * radius[a] * radius[b])
-                })
-            })
-            .sum();
-
-        if bound.is_nan() { f64::INFINITY } else { bound }
-    }
-
-    /// The start sets of the next step: the time-point sets of `steps`,
-    /// with pairs merged where [`merge_tolerance`](NonlinearSettings::merge_tolerance)
-    /// allows and the merge is no wider than `cap`.
-    fn next_pieces(&self, steps: &[Step], cap: f64) -> Vec<SparsePolyZonotope> {
-        let pieces = steps.iter().map(|s| s.time_point.clone()).collect();
-        split::merge(pieces, self.settings.merge_tolerance, cap, |merged| {
-            polynomialization::cap_degree(merged, self.settings.max_degree)
-                .reduce(self.settings.order, Reduction::Girard)
-        })
-    }
-
     /// The linear model around `z* = (x* , c_u)`, where `x*` is the middle
     /// of `x`'s interval hull moved half a step along `f` (as CORA does);
     /// `None` if a value along the way is not finite.
-    fn linearize(&self, x: &SparsePolyZonotope, u: &Zonotope) -> Option<Linearization> {
+    fn linearize(&self, x: &SparsePolyZonotope, u: &Zonotope, step: f64) -> Option<Linearization> {
         let n = self.dynamics.states();
         let middle: Vec<f64> = x
             .interval_hull()
@@ -638,7 +535,7 @@ impl<D: Dynamics> NonlinearReach<D> {
         let point: Vec<f64> = middle
             .iter()
             .zip(&drift)
-            .map(|(&m, d)| m + 0.5 * self.settings.step * f64::midpoint(d.lo, d.hi))
+            .map(|(&m, d)| m + 0.5 * step * f64::midpoint(d.lo, d.hi))
             .chain(inputs)
             .collect();
         if !point.iter().all(|v| v.is_finite()) {
@@ -667,6 +564,15 @@ impl<D: Dynamics> NonlinearReach<D> {
             jacobian_radius,
         })
     }
+}
+
+/// The step length and error terms of one step attempt.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct Attempt {
+    /// The step length `r`, positive and finite.
+    pub(crate) step: f64,
+    /// The error terms to include: all of them outside the tests.
+    pub(crate) terms: Terms,
 }
 
 /// One term of the abstraction error, so that the tests can drop it.

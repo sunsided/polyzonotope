@@ -67,7 +67,14 @@ impl Scenario {
         let mut x = start_box(self.center, self.radius);
         let mut sets = Vec::with_capacity(self.steps);
         for _ in 0..self.steps {
-            let Ok(step) = reach.step_with(&x, &u, terms) else {
+            let Ok((step, _)) = reach.step_with(
+                &x,
+                &u,
+                super::Attempt {
+                    step: self.step,
+                    terms,
+                },
+            ) else {
                 break;
             };
             sets.push((

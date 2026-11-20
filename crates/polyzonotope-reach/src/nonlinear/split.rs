@@ -89,7 +89,7 @@ fn box_independent(pz: &SparsePolyZonotope) -> SparsePolyZonotope {
 
 /// `pz` with every independent generator turned into a dependent factor of
 /// its own; the same set.
-fn lift_independent(pz: &SparsePolyZonotope) -> SparsePolyZonotope {
+pub(super) fn lift_independent(pz: &SparsePolyZonotope) -> SparsePolyZonotope {
     let (dependent, independent, powers) = (
         pz.dependent_generators(),
         pz.independent_generators(),

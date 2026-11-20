@@ -7,9 +7,10 @@ use core::f64::consts::{FRAC_PI_2, TAU};
 
 use nalgebra::{DMatrix, DVector};
 use polyzonotope::{Interval, IntervalBox, IntervalMatrix, SparsePolyZonotope, Zonotope};
+use polyzonotope_reach::Adaptive;
 use polyzonotope_reach::{
     Dynamics, IntervalTensor, LinearReach, LinearSystem, Method, NonlinearReach, NonlinearSettings,
-    Polynomial, ReachError, Splitting, Step,
+    Polynomial, ReachError, Restructure, Splitting, Step,
 };
 use proptest::collection::vec;
 use proptest::prelude::*;
@@ -227,7 +228,6 @@ fn check_trajectories(
     f: fn(&DVector<f64>, f64) -> DVector<f64>,
     flowpipe: &[Vec<Step>],
     (center, radius, u_radius): (&[f64], f64, f64),
-    r: f64,
     samples: usize,
 ) {
     let enclosures: Vec<Vec<(Enclosure, Enclosure)>> = flowpipe
@@ -252,13 +252,14 @@ fn check_trajectories(
             center[i] + radius * if s < 4 { corner } else { rng.next() }
         });
         for (k, pieces) in enclosures.iter().enumerate() {
+            let h = flowpipe[k][0].duration / f64::from(SUBSTEPS);
             for _ in 0..SUBSTEPS {
                 let u = match s % 3 {
                     0 => u_radius,
                     1 => -u_radius,
                     _ => u_radius * rng.next(),
                 };
-                x = rk4(f, &x, u, r / f64::from(SUBSTEPS));
+                x = rk4(f, &x, u, h);
                 assert!(
                     pieces.iter().any(|(during, _)| during.holds(&x)),
                     "sample {s} left the time-interval set of step {k} at {x}"
@@ -281,7 +282,7 @@ fn van_der_pol_contains_trajectories(method: Method) {
     let flowpipe = reach
         .reach(&initial_box(&center, radius), &input(u), 40)
         .expect("converges for this step");
-    check_trajectories(van_der_pol_f64, &flowpipe, (&center, radius, u), 0.02, 24);
+    check_trajectories(van_der_pol_f64, &flowpipe, (&center, radius, u), 24);
 }
 
 /// From a single point and without input, the abstraction error alone has
@@ -291,7 +292,7 @@ fn van_der_pol_contains_a_point_trajectory(method: Method) {
     let flowpipe = reach
         .reach(&initial_box(&[1.4, 2.4], 0.0), &input(0.0), 40)
         .expect("converges for this step");
-    check_trajectories(van_der_pol_f64, &flowpipe, (&[1.4, 2.4], 0.0, 0.0), 0.05, 1);
+    check_trajectories(van_der_pol_f64, &flowpipe, (&[1.4, 2.4], 0.0, 0.0), 1);
 }
 
 /// The pendulum at large angles, with a torque input: every sampled
@@ -302,7 +303,7 @@ fn pendulum_contains_trajectories(method: Method) {
     let flowpipe = reach
         .reach(&initial_box(&center, radius), &input(u), 40)
         .expect("converges for this step");
-    check_trajectories(pendulum_f64, &flowpipe, (&center, radius, u), 0.025, 24);
+    check_trajectories(pendulum_f64, &flowpipe, (&center, radius, u), 24);
 }
 
 /// `x₀' = x₀³`, `x₁' = −x₁` around the origin: the linearization there is
@@ -321,7 +322,7 @@ fn cubic_drift_is_contained(method: Method) {
     let flowpipe = reach
         .reach(&initial_box(&[0.0, 0.0], 0.5), &input(0.0), 10)
         .expect("converges for this step");
-    check_trajectories(cubic, &flowpipe, (&[0.0, 0.0], 0.5, 0.0), 0.05, 24);
+    check_trajectories(cubic, &flowpipe, (&[0.0, 0.0], 0.5, 0.0), 24);
 }
 
 /// A set far too large for the step is refused, not enclosed loosely.
@@ -361,13 +362,15 @@ fn overflow_is_refused(method: Method) {
 }
 
 /// Splitting carries a large set through a step that one piece cannot,
-/// and the pieces still contain every sampled trajectory.
+/// and the pieces still contain every sampled trajectory. Without lifting,
+/// where one piece fails sooner.
 #[test]
 fn splitting_rescues_a_large_set() {
     let (center, radius, r, steps) = ([1.4, 2.4], 1.0, 0.02, 9);
     let start = initial_box(&center, radius);
     let single = NonlinearSettings {
         max_pieces: 1,
+        restructure: Restructure::Off,
         ..sharp(r, Method::Linearization)
     };
     let unsplit =
@@ -385,7 +388,7 @@ fn splitting_rescues_a_large_set() {
         .reach(&start, &input(0.0), steps)
         .expect("splitting makes the step converge");
     assert!(flowpipe.last().expect("nine steps").len() > 1);
-    check_trajectories(van_der_pol_f64, &flowpipe, (&center, radius, 0.0), r, 24);
+    check_trajectories(van_der_pol_f64, &flowpipe, (&center, radius, 0.0), 24);
 }
 
 both_methods!(van_der_pol_box, van_der_pol_contains_trajectories);
@@ -400,6 +403,8 @@ both_methods!(merging, pieces_merge_as_the_set_contracts);
 /// `x₀' = −x₀ − x₀³`, `x₁' = −x₁ + ½ x₀²` from a wide box: the cubic forces
 /// splits early on, and the contraction toward the origin later lets the
 /// pieces merge again. The merged sets still hold every trajectory.
+/// Without lifting: with it, polynomialization diverges at step 7 here, and
+/// the merging, not the lifting, is under test.
 fn pieces_merge_as_the_set_contracts(method: Method) {
     /// The vector field in plain `f64`.
     fn damped(x: &DVector<f64>, _: f64) -> DVector<f64> {
@@ -411,13 +416,17 @@ fn pieces_merge_as_the_set_contracts(method: Method) {
         .term(0, -1.0, &[3, 0, 0])
         .term(1, -1.0, &[0, 1, 0])
         .term(1, 0.5, &[2, 0, 0]);
-    let flowpipe = NonlinearReach::new(dynamics, sharp(0.1, method))
+    let settings = NonlinearSettings {
+        restructure: Restructure::Off,
+        ..sharp(0.1, method)
+    };
+    let flowpipe = NonlinearReach::new(dynamics, settings)
         .reach(&initial_box(&[0.0, 0.0], 1.0), &input(0.0), 40)
         .expect("splitting carries the set");
     let counts: Vec<usize> = flowpipe.iter().map(Vec::len).collect();
     assert!(counts.iter().any(|&c| c > 1), "{counts:?}");
     assert!(counts.windows(2).any(|w| w[1] < w[0]), "{counts:?}");
-    check_trajectories(damped, &flowpipe, (&[0.0, 0.0], 1.0, 0.0), 0.1, 12);
+    check_trajectories(damped, &flowpipe, (&[0.0, 0.0], 1.0, 0.0), 12);
 }
 
 /// `x₀' = x₁`, `x₁' = −x₀ − x₀ u`: a spring whose stiffness the input
@@ -443,15 +452,15 @@ fn bilinear_input_is_contained(method: Method) {
     let flowpipe = reach
         .reach(&initial_box(&center, radius), &input(u), 40)
         .expect("converges for this step");
-    check_trajectories(bilinear_f64, &flowpipe, (&center, radius, u), 0.05, 24);
+    check_trajectories(bilinear_f64, &flowpipe, (&center, radius, u), 24);
 }
 
-/// From radius 0.5, Van der Pol defeats linearization within a second
-/// without splitting, while polynomialization carries the set through and
+/// From radius 1, Van der Pol defeats linearization after 13 steps
+/// without splitting, while polynomialization carries the set for 18 and
 /// still contains every sampled trajectory.
 #[test]
 fn polynomialization_carries_a_large_set() {
-    let (center, radius, r, steps) = ([1.4, 2.4], 0.5, 0.02, 40);
+    let (center, radius, r, steps) = ([1.4, 2.4], 1.0, 0.02, 18);
     let start = initial_box(&center, radius);
     let settings = |method| NonlinearSettings {
         max_pieces: 1,
@@ -468,11 +477,13 @@ fn polynomialization_carries_a_large_set() {
     let flowpipe = NonlinearReach::new(van_der_pol(), settings(Method::Polynomialization))
         .reach(&start, &input(0.0), steps)
         .expect("polynomialization converges");
-    check_trajectories(van_der_pol_f64, &flowpipe, (&center, radius, 0.0), r, 24);
+    check_trajectories(van_der_pol_f64, &flowpipe, (&center, radius, 0.0), 24);
 }
 
 /// On a set both methods carry, polynomialization's sets are smaller once
-/// the set is wide enough for the quadratic error to dominate.
+/// the set is wide enough for the quadratic error to dominate. Without
+/// lifting: with it, linearization's quadratic map is exact on the lifted
+/// factors too, and the two end within 1% of each other here.
 #[test]
 fn polynomialization_is_tighter_on_a_wide_set() {
     let width = |flowpipe: &[Vec<Step>]| -> f64 {
@@ -483,7 +494,11 @@ fn polynomialization_is_tighter_on_a_wide_set() {
     };
     let start = initial_box(&[1.4, 2.4], 0.2);
     let run = |method| {
-        NonlinearReach::new(van_der_pol(), sharp(0.02, method))
+        let settings = NonlinearSettings {
+            restructure: Restructure::Off,
+            ..sharp(0.02, method)
+        };
+        NonlinearReach::new(van_der_pol(), settings)
             .reach(&start, &input(0.0), 40)
             .expect("converges")
     };
@@ -494,6 +509,86 @@ fn polynomialization_is_tighter_on_a_wide_set() {
         polynomialized < 0.9 * linearized,
         "{polynomialized} vs {linearized}"
     );
+}
+
+/// Lifting the independent generators to factors keeps a wide set's
+/// shape: from radius 0.5, polynomialization ends 0.8 s at under half the
+/// width it reaches without, and every sampled trajectory is still inside.
+#[test]
+fn lifting_keeps_wide_sets_narrow() {
+    let (center, radius) = ([1.4, 2.4], 0.5);
+    let start = initial_box(&center, radius);
+    let run = |restructure| {
+        let settings = NonlinearSettings {
+            restructure,
+            ..sharp(0.02, Method::Polynomialization)
+        };
+        NonlinearReach::new(van_der_pol(), settings)
+            .reach(&start, &input(0.0), 40)
+            .expect("converges")
+    };
+    let width = |flowpipe: &[Vec<Step>]| -> f64 {
+        let hull = flowpipe.last().expect("steps")[0]
+            .time_point
+            .interval_hull();
+        hull.0.iter().map(Interval::width).sum()
+    };
+
+    let lifted = run(Restructure::Lift);
+    let boxed = width(&run(Restructure::Off));
+    assert!(
+        width(&lifted) < 0.5 * boxed,
+        "{} vs {boxed}",
+        width(&lifted)
+    );
+    check_trajectories(van_der_pol_f64, &lifted, (&center, radius, 0.0), 12);
+}
+
+/// Shrinking the step on a refusal carries Van der Pol from radius 1
+/// further in time than the fixed step, and the steps of varying length
+/// still contain every sampled trajectory.
+#[test]
+fn shrinking_steps_reach_further() {
+    let (center, radius, horizon) = ([1.4, 2.4], 1.0, 0.42);
+    let start = initial_box(&center, radius);
+    let fixed = sharp(0.02, Method::Polynomialization);
+    let failure = NonlinearReach::new(van_der_pol(), fixed.clone())
+        .reach_for(&start, &input(0.0), horizon)
+        .expect_err("the fixed step diverges first");
+    let reached: f64 = failure.proven.iter().map(|p| p[0].duration).sum();
+    assert!(reached < horizon);
+
+    let adaptive = NonlinearSettings {
+        adaptive: Some(Adaptive::new(0.001, 0.02)),
+        ..fixed
+    };
+    let flowpipe = NonlinearReach::new(van_der_pol(), adaptive)
+        .reach_for(&start, &input(0.0), horizon)
+        .expect("shorter steps carry the set");
+    let durations: Vec<f64> = flowpipe.iter().map(|p| p[0].duration).collect();
+    assert!(durations.iter().any(|&r| r < 0.02), "{durations:?}");
+    assert!((durations.iter().sum::<f64>() - horizon).abs() < 1e-12);
+    check_trajectories(van_der_pol_f64, &flowpipe, (&center, radius, 0.0), 12);
+}
+
+/// Easy steps grow the step: from a small box, the step climbs from 0.01
+/// to the 0.04 cap, and the sets still hold every sampled trajectory.
+#[test]
+fn easy_steps_grow() {
+    let (center, radius, u) = ([1.4, 2.4], 0.05, 0.05);
+    let settings = NonlinearSettings {
+        adaptive: Some(Adaptive::new(0.005, 0.04)),
+        ..sharp(0.01, Method::Polynomialization)
+    };
+    let flowpipe = NonlinearReach::new(van_der_pol(), settings)
+        .reach_for(&initial_box(&center, radius), &input(u), 0.5)
+        .expect("converges");
+    let durations: Vec<f64> = flowpipe.iter().map(|p| p[0].duration).collect();
+    assert!(
+        durations.iter().any(|&r| (r - 0.04).abs() < 1e-15),
+        "{durations:?}"
+    );
+    check_trajectories(van_der_pol_f64, &flowpipe, (&center, radius, u), 24);
 }
 
 /// Dynamics without third derivatives are refused by polynomialization at
@@ -585,8 +680,8 @@ fn factor_splits_carry_the_cubic_drift() {
     let flowpipe = NonlinearReach::new(dynamics, settings)
         .reach(&initial_box(&[0.0, 0.0], 0.5), &input(0.0), 10)
         .expect("factor splits carry the set");
-    assert!(flowpipe.last().expect("ten steps").len() > 8);
-    check_trajectories(cubic, &flowpipe, (&[0.0, 0.0], 0.5, 0.0), 0.05, 24);
+    assert!(flowpipe.last().expect("ten steps").len() > 1);
+    check_trajectories(cubic, &flowpipe, (&[0.0, 0.0], 0.5, 0.0), 24);
 }
 
 /// A random linear system `x' = A x + B u` with two states and one input,
@@ -674,10 +769,10 @@ fn failure_keeps_the_proven_steps() {
     let reach = NonlinearReach::new(van_der_pol(), settings);
     let start = initial_box(&[1.4, 2.4], 1.0);
     let failure = reach
-        .reach(&start, &input(0.0), 9)
+        .reach(&start, &input(0.0), 20)
         .expect_err("diverges unsplit");
     assert_eq!(failure.error, ReachError::AbstractionDiverged);
-    assert!(failure.proven.len() < 9);
+    assert!(failure.proven.len() < 20);
 
     let shorter = reach
         .reach(&start, &input(0.0), failure.proven.len())

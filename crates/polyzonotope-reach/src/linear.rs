@@ -25,6 +25,9 @@ pub struct Step {
     pub time_point: SparsePolyZonotope,
     /// Every state the system can be in at some `t ∈ [t_k, t_k + r]`.
     pub time_interval: SparsePolyZonotope,
+    /// The step length `r`: the configured step, unless adaptive steps
+    /// (see [`Adaptive`](crate::Adaptive)) chose another.
+    pub duration: f64,
 }
 
 /// Precomputed one-step propagation of a [`LinearSystem`] with time step `r`.
@@ -106,6 +109,7 @@ impl LinearReach {
         Step {
             time_point,
             time_interval,
+            duration: self.taylor.step,
         }
     }
 

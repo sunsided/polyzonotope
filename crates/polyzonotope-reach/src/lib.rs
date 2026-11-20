@@ -14,7 +14,7 @@ mod taylor;
 
 pub use dynamics::{Dynamics, IntervalTensor, Polynomial};
 pub use linear::{LinearReach, LinearSystem, Step};
-pub use nonlinear::{Method, NonlinearReach, NonlinearSettings, Splitting};
+pub use nonlinear::{Adaptive, Method, NonlinearReach, NonlinearSettings, Restructure, Splitting};
 
 /// Why a reachability computation could not produce a sound result.
 ///
