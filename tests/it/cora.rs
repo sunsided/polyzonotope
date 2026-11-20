@@ -39,6 +39,12 @@ fn cases() -> Vec<Case> {
         );
     }
 
+    // An empty or truncated reference would make every check pass vacuously.
+    assert_eq!(
+        cases.len(),
+        8,
+        "tests/cora/reference.txt should hold eight cases"
+    );
     cases
 }
 
