@@ -145,7 +145,8 @@ impl<D: Dynamics> NonlinearReach<D> {
     /// - [`ReachError::StepTooLarge`] if the matrix exponential's remainder
     ///   bound fails for the linearized `A`.
     /// - [`ReachError::AbstractionDiverged`] if no error guess was confirmed
-    ///   within `max_iterations`, or the error stopped being finite: the set
+    ///   within `max_iterations`, or the model or the error stopped being
+    ///   finite: the set
     ///   or the step is too large for the linearization. No set is returned
     ///   then, since none is proven.
     ///
@@ -157,7 +158,9 @@ impl<D: Dynamics> NonlinearReach<D> {
         assert_eq!(x.dim(), n, "x needs one row per state");
         assert_eq!(u.dim(), self.dynamics.inputs(), "u needs one row per input");
 
-        let model = self.linearize(x, u);
+        let model = self
+            .linearize(x, u)
+            .ok_or(ReachError::AbstractionDiverged)?;
         let system = LinearSystem {
             a: model.a.clone(),
             b: DMatrix::identity(n, n),
@@ -257,8 +260,9 @@ impl<D: Dynamics> NonlinearReach<D> {
     }
 
     /// The linear model around `z* = (x* , c_u)`, where `x*` is the middle
-    /// of `x`'s interval hull moved half a step along `f` (as CORA does).
-    fn linearize(&self, x: &SparsePolyZonotope, u: &Zonotope) -> Linearization {
+    /// of `x`'s interval hull moved half a step along `f` (as CORA does);
+    /// `None` if a value along the way is not finite.
+    fn linearize(&self, x: &SparsePolyZonotope, u: &Zonotope) -> Option<Linearization> {
         let n = self.dynamics.states();
         let middle: Vec<f64> = x
             .interval_hull()
@@ -276,19 +280,36 @@ impl<D: Dynamics> NonlinearReach<D> {
             .map(|(&m, d)| m + 0.5 * self.settings.step * f64::midpoint(d.lo, d.hi))
             .chain(inputs)
             .collect();
+        if !point.iter().all(|v| v.is_finite()) {
+            return None;
+        }
 
         let at = points(point.iter().copied());
-        let (jacobian, jacobian_radius) = self.dynamics.jacobian(&at).center_radius();
-        let offset = model_offset(&self.dynamics.flow(&at), &jacobian, &point);
+        let jacobian = self.dynamics.jacobian(&at);
+        let flow = self.dynamics.flow(&at);
+        if !all_finite(jacobian.0.iter()) || !all_finite(flow.iter()) {
+            return None;
+        }
 
-        Linearization {
+        let (jacobian, jacobian_radius) = jacobian.center_radius();
+        let offset = model_offset(&flow, &jacobian, &point);
+        if !all_finite(offset.iter()) {
+            return None;
+        }
+
+        Some(Linearization {
             a: jacobian.columns(0, n).into_owned(),
             b: jacobian.columns(n, point.len() - n).into_owned(),
             point,
             offset,
             jacobian_radius,
-        }
+        })
     }
+}
+
+/// Whether every bound in `intervals` is finite (and so not NaN either).
+fn all_finite<'a>(mut intervals: impl Iterator<Item = &'a Interval>) -> bool {
+    intervals.all(|iv| iv.lo.is_finite() && iv.hi.is_finite())
 }
 
 /// `piece` in two: its oriented box (PCA reduction to order 1), halved

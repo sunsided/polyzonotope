@@ -14,7 +14,11 @@ pub use polynomial::Polynomial;
 /// Every method takes `z = (x, u)`: first the `states()` state intervals,
 /// then the `inputs()` input intervals. Each result must contain the exact
 /// value for every point of the box `z`. A point interval asks for the value
-/// at that point; the enclosure then only has to cover rounding.
+/// at that point; the enclosure then only has to cover rounding. When a
+/// bound overflows, return an infinite one instead of panicking: the step
+/// then refuses with [`ReachError::AbstractionDiverged`](crate::ReachError::AbstractionDiverged).
+/// Under `sound`, the interval operations of `polyzonotope` panic when an
+/// operand is infinite, so check before adding to an overflowed value.
 ///
 /// [`Polynomial`] implements this for polynomial dynamics. For other
 /// functions, implement it with interval extensions of the elementary

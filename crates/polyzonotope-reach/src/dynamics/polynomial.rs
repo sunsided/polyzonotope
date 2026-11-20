@@ -45,6 +45,12 @@ pub struct Polynomial {
     rows: Vec<Vec<Term>>,
 }
 
+/// The whole real line, the enclosure of a value that overflowed.
+const UNBOUNDED: Interval = Interval {
+    lo: f64::NEG_INFINITY,
+    hi: f64::INFINITY,
+};
+
 /// One term `c · Π_j z_j^{e_j}`.
 #[derive(Clone, Debug, PartialEq)]
 struct Term {
@@ -96,13 +102,25 @@ impl Polynomial {
         self.states + self.inputs
     }
 
-    /// The sum of `term` over `f_row`, each term first differentiated by
-    /// the variables in `by`.
+    /// The sum of the terms of `f_row`, each first differentiated by the
+    /// variables in `by`; the whole real line once a bound overflows, since
+    /// under `sound` adding an infinite bound would panic.
     fn evaluate(&self, row: usize, by: &[usize], z: &[Interval]) -> Interval {
-        self.rows[row]
-            .iter()
-            .filter_map(|t| t.derivative(by))
-            .fold(Interval::point(0.0), |acc, t| acc + t.value(z))
+        let finite = |iv: Interval| iv.lo.is_finite() && iv.hi.is_finite();
+        let mut sum = Interval::point(0.0);
+        for term in self.rows[row].iter().filter_map(|t| t.derivative(by)) {
+            let value = term.value(z);
+            if !finite(value) {
+                return UNBOUNDED;
+            }
+
+            sum = sum + value;
+            if !finite(sum) {
+                return UNBOUNDED;
+            }
+        }
+
+        sum
     }
 }
 
@@ -215,6 +233,14 @@ mod tests {
         assert_eq!(h.0[(0, 1)], Interval::point(4.0));
         assert_eq!(h.0[(1, 0)], Interval::point(4.0));
         assert_eq!(h.0[(1, 1)], Interval::point(0.0));
+    }
+
+    /// A value too large for `f64` gives the whole real line, not a panic.
+    #[test]
+    fn overflow_is_unbounded() {
+        let field = Polynomial::new(1, 0).term(0, 1.0, &[9]).term(0, 1.0, &[1]);
+        let flow = field.flow(&[Interval::new(-1e40, 1e40)]);
+        assert_eq!(flow[0], UNBOUNDED);
     }
 
     /// The enclosure over a box contains the value at sampled points.

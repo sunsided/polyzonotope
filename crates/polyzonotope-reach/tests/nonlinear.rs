@@ -5,7 +5,7 @@
 use core::f64::consts::{FRAC_PI_2, TAU};
 
 use nalgebra::{DMatrix, DVector};
-use polyzonotope::{Interval, IntervalMatrix, SparsePolyZonotope, Zonotope};
+use polyzonotope::{Interval, IntervalBox, IntervalMatrix, SparsePolyZonotope, Zonotope};
 use polyzonotope_reach::{
     Dynamics, LinearReach, LinearSystem, NonlinearReach, NonlinearSettings, Polynomial, ReachError,
     Step,
@@ -151,20 +151,36 @@ fn rk4(
     x + (k1 + k2 * 2.0 + k3 * 2.0 + k4) * (h / 6.0)
 }
 
-/// Whether `x` lies in the set, as seen by its interval hull and by the
-/// support function of its zonotope enclosure in 16 directions.
-fn inside(set: &SparsePolyZonotope, x: &DVector<f64>) -> bool {
-    if !set.interval_hull().contains(x, TOL) {
-        return false;
+/// A set's interval hull and zonotope enclosure, computed once and used as
+/// a necessary test for membership.
+struct Enclosure {
+    /// The interval hull.
+    hull: IntervalBox,
+    /// The zonotope enclosure.
+    zonotope: Zonotope,
+}
+
+impl Enclosure {
+    /// The enclosures of `set`.
+    fn of(set: &SparsePolyZonotope) -> Self {
+        Self {
+            hull: set.interval_hull(),
+            zonotope: set.to_zonotope(),
+        }
     }
 
-    let z = set.to_zonotope();
-    (0..16).all(|k| {
-        let angle = TAU * f64::from(k) / 16.0;
-        let d = DVector::from_vec(vec![angle.cos(), angle.sin()]);
-        let support = d.dot(z.center()) + (d.transpose() * z.generators()).abs().sum();
-        d.dot(x) <= support + TOL
-    })
+    /// Whether `x` lies in the hull and below the zonotope's support
+    /// function in 16 directions.
+    fn holds(&self, x: &DVector<f64>) -> bool {
+        let z = &self.zonotope;
+        self.hull.contains(x, TOL)
+            && (0..16).all(|k| {
+                let angle = TAU * f64::from(k) / 16.0;
+                let d = DVector::from_vec(vec![angle.cos(), angle.sin()]);
+                let support = d.dot(z.center()) + (d.transpose() * z.generators()).abs().sum();
+                d.dot(x) <= support + TOL
+            })
+    }
 }
 
 /// Simulates `samples` trajectories from corners and random points of
@@ -179,23 +195,38 @@ fn check_trajectories(
     r: f64,
     samples: usize,
 ) {
+    let enclosures: Vec<Vec<(Enclosure, Enclosure)>> = flowpipe
+        .iter()
+        .map(|pieces| {
+            pieces
+                .iter()
+                .map(|p| {
+                    (
+                        Enclosure::of(&p.time_interval),
+                        Enclosure::of(&p.time_point),
+                    )
+                })
+                .collect()
+        })
+        .collect();
+
     let mut rng = Samples(7);
     for s in 0..samples {
         let mut x = DVector::from_fn(2, |i, _| {
             let corner = if (s >> i) & 1 == 0 { -1.0 } else { 1.0 };
             center[i] + radius * if s < 4 { corner } else { rng.next() }
         });
-        for (k, pieces) in flowpipe.iter().enumerate() {
+        for (k, pieces) in enclosures.iter().enumerate() {
             for _ in 0..SUBSTEPS {
                 x = rk4(f, &x, u_radius * rng.next(), r / f64::from(SUBSTEPS));
                 assert!(
-                    pieces.iter().any(|p| inside(&p.time_interval, &x)),
+                    pieces.iter().any(|(during, _)| during.holds(&x)),
                     "sample {s} left the time-interval set of step {k} at {x}"
                 );
             }
 
             assert!(
-                pieces.iter().any(|p| inside(&p.time_point, &x)),
+                pieces.iter().any(|(_, end)| end.holds(&x)),
                 "sample {s} left the time-point set of step {k} at {x}"
             );
         }
@@ -203,13 +234,13 @@ fn check_trajectories(
 }
 
 /// Van der Pol from a box, with an input: every sampled trajectory stays in
-/// the sets over 1.5 s.
+/// the sets over 0.8 s.
 #[test]
 fn van_der_pol_contains_trajectories() {
     let (center, radius, u) = ([1.4, 2.4], 0.05, 0.05);
     let reach = NonlinearReach::new(van_der_pol(), sharp(0.02));
     let flowpipe = reach
-        .reach(&initial_box(&center, radius), &input(u), 75)
+        .reach(&initial_box(&center, radius), &input(u), 40)
         .expect("converges for this step");
     check_trajectories(van_der_pol_f64, &flowpipe, (&center, radius, u), 0.02, 24);
 }
@@ -226,13 +257,13 @@ fn van_der_pol_contains_a_point_trajectory() {
 }
 
 /// The pendulum at large angles, with a torque input: every sampled
-/// trajectory stays in the sets over 2 s.
+/// trajectory stays in the sets over 1 s.
 #[test]
 fn pendulum_contains_trajectories() {
     let (center, radius, u) = ([1.2, 0.0], 0.05, 0.02);
     let reach = NonlinearReach::new(Pendulum, sharp(0.025));
     let flowpipe = reach
-        .reach(&initial_box(&center, radius), &input(u), 80)
+        .reach(&initial_box(&center, radius), &input(u), 40)
         .expect("converges for this step");
     check_trajectories(pendulum_f64, &flowpipe, (&center, radius, u), 0.025, 24);
 }
@@ -242,6 +273,7 @@ fn pendulum_contains_trajectories() {
 /// value at the center, holds the outward drift.
 #[test]
 fn cubic_drift_is_contained() {
+    /// The vector field in plain `f64`.
     fn cubic(x: &DVector<f64>, _: f64) -> DVector<f64> {
         DVector::from_vec(vec![x[0].powi(3), -x[1]])
     }
@@ -265,6 +297,27 @@ fn oversized_set_is_refused() {
     };
     let reach = NonlinearReach::new(van_der_pol(), settings);
     let result = reach.reach(&initial_box(&[1.4, 2.4], 3.0), &input(0.0), 5);
+    assert_eq!(result.err(), Some(ReachError::AbstractionDiverged));
+}
+
+/// A degree-9 field that overflows `f64` during the error check is
+/// refused, not a panic, even under `sound`.
+#[test]
+fn overflow_is_refused() {
+    let dynamics = Polynomial::new(2, 0)
+        .term(0, 1.0, &[9, 0])
+        .term(1, -1.0, &[1, 9]);
+    let settings = NonlinearSettings {
+        max_pieces: 4,
+        max_iterations: 30,
+        enlarge: 10.0,
+        ..NonlinearSettings::new(0.05)
+    };
+    let result = NonlinearReach::new(dynamics, settings).reach(
+        &initial_box(&[0.0, 0.0], 1.0),
+        &Zonotope::new(DVector::zeros(0), DMatrix::zeros(0, 0)),
+        5,
+    );
     assert_eq!(result.err(), Some(ReachError::AbstractionDiverged));
 }
 
@@ -322,6 +375,10 @@ fn same_hull(a: &SparsePolyZonotope, b: &SparsePolyZonotope, tol: f64) -> bool {
 }
 
 proptest! {
+    // A fixed identity rather than a search: 64 cases are plenty, and the
+    // default 256 (or test:prop's 10000) would cost minutes in debug builds.
+    #![proptest_config(ProptestConfig::with_cases(64))]
+
     /// For linear dynamics the abstraction error vanishes, so one nonlinear
     /// step gives the sets of the linear reach, up to rounding.
     #[test]

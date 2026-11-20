@@ -14,7 +14,7 @@ use alloc::vec::Vec;
 use nalgebra::DMatrix;
 use polyzonotope::{Interval, IntervalBox, IntervalMatrix, SparsePolyZonotope, Zonotope};
 
-use super::Linearization;
+use super::{Linearization, all_finite};
 use crate::Dynamics;
 
 /// An interval enclosure of the abstraction error over `states × u`, one
@@ -27,7 +27,7 @@ pub(super) fn abstraction_error<D: Dynamics>(
 ) -> Option<Vec<Interval>> {
     let deviation = deviation(states, u, &model.point);
     let hull = deviation.interval_hull();
-    if !is_finite(hull.0.iter()) {
+    if !all_finite(hull.0.iter()) {
         return None;
     }
 
@@ -53,7 +53,7 @@ pub(super) fn abstraction_error<D: Dynamics>(
         })
         .collect();
 
-    is_finite(error.iter()).then_some(error)
+    all_finite(error.iter()).then_some(error)
 }
 
 /// `Δz = (x − x*, u − u*)` over `states × u`, as one polynomial zonotope.
@@ -112,9 +112,4 @@ fn quadratic_fits(hessian: &IntervalMatrix, magnitude: &[Interval]) -> bool {
         .sum();
 
     bound < ERROR_LIMIT
-}
-
-/// Whether every bound in `intervals` is finite (and so not NaN either).
-fn is_finite<'a>(mut intervals: impl Iterator<Item = &'a Interval>) -> bool {
-    intervals.all(|iv| iv.lo.is_finite() && iv.hi.is_finite())
 }
