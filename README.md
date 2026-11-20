@@ -37,7 +37,6 @@ Dependent factors carry global `FactorId`s, so sets derived from the same uncert
 | `interval_hull_split(tol, max_splits)` | sound enclosure, tightened by branch and bound over `split` |
 | `quadratic_map` | exact without independent generators; otherwise the monomials with a `β` are enclosed |
 | `reduce` (`Reduction::Girard`, `Reduction::Pca`), also on `Zonotope` | sound enclosure with at most `order · dim` generators |
-
 | `intersection(&polytope, max_splits)`, `containment(&polytope, max_splits)`, also on `Zonotope` | three-valued check: `Disjoint` / `Inside` are proofs, the other answers are not |
 | `split_pieces(splits)`, `Zonotope::polygon` (2-D) | exact pieces; a polygon outline for drawing |
 
@@ -64,9 +63,9 @@ flowchart LR
 
 A `Polytope` is an intersection of `Halfspace`s `{ x | aᵀx <= d }`, and `Polytope::from_box` turns an `IntervalBox` into one. `intersection` answers whether a set meets a polytope, `containment` whether it lies inside. Both return three values, because an enclosure can prove a negative but not a positive:
 
-- `Intersection::Disjoint` and `Containment::Inside` come from sound outer bounds, and are proofs.
+- `Intersection::Disjoint` and `Containment::Inside` come from outer bounds, and are proofs. They are rigorous only with the `sound` feature; in plain `f64`, rounding can make them wrong by a few ulps at the boundary.
 - `Intersection::Intersects` and `Containment::NotInside` rest on a witness point, evaluated in plain `f64`. Near the boundary they are not certified.
-- `Unknown` means the split budget ran out.
+- `Unknown` means the split budget ran out, or the remaining piece has nothing left to split.
 
 Where safety is at stake, accept only the proofs. Both checks split the set (`max_splits` in total) until they can decide. A zonotope against a single halfspace needs no splits. Points inside a zonotope, and one zonotope inside another, need linear programming and are not covered.
 

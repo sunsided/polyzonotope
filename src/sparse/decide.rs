@@ -14,7 +14,8 @@ impl SparsePolyZonotope {
     /// strictly above `d` for some facet `aᵀ x <= d`. A piece whose witness
     /// point lies in `p` gives [`Intersection::Intersects`]; any other piece is
     /// split along its heaviest factor. At most `max_splits` splits are made
-    /// in total.
+    /// in total. Factors with an exponent above the limit of
+    /// [`split`](Self::split) are never split; such pieces give `Unknown`.
     ///
     /// # Panics
     ///
@@ -52,7 +53,8 @@ impl SparsePolyZonotope {
     ///
     /// For each facet `aᵀ x <= d`, branch and bound on `aᵀ x` either proves
     /// the maximum is at most `d`, or finds a point above `d`. At most
-    /// `max_splits` splits are made in total.
+    /// `max_splits` splits are made in total. Factors with an exponent above
+    /// the limit of [`split`](Self::split) are never split.
     ///
     /// # Panics
     ///
@@ -178,7 +180,8 @@ impl SparsePolyZonotope {
     }
 
     /// The factor whose monomials weigh most over all dimensions, by
-    /// `Σ_j ‖G[:, j]‖₁ E[k, j]`; `None` if no monomial depends on a factor.
+    /// `Σ_j ‖G[:, j]‖₁ E[k, j]`; `None` if no monomial depends on a factor
+    /// that [`split`](Self::split) accepts.
     pub(crate) fn heaviest_factor_overall(&self) -> Option<FactorId> {
         let (g, e) = (self.dependent_generators(), self.exponents());
         let weight = |k: usize| -> f64 {
@@ -189,7 +192,7 @@ impl SparsePolyZonotope {
 
         (0..self.ids().len())
             .map(|k| (k, weight(k)))
-            .filter(|&(_, w)| w > 0.0)
+            .filter(|&(k, w)| w > 0.0 && self.can_split(k))
             .max_by(|x, y| x.1.total_cmp(&y.1))
             .map(|(k, _)| self.ids()[k])
     }
