@@ -1,15 +1,20 @@
 //! Reachable sets of nonlinear systems `x' = f(x, u)` by conservative
-//! linearization with a polynomial second-order error (Althoff, Stursberg &
-//! Buss 2008; Althoff 2013; Kochdumper & Althoff 2021).
+//! linearization (Althoff, Stursberg & Buss 2008) or conservative
+//! polynomialization (Althoff 2013), with polynomial zonotopes (Kochdumper &
+//! Althoff 2021).
 //!
 //! Each step linearizes `f` around a point `z* = (x*, u*)` and treats the
 //! rest, the abstraction error, as an extra uncertain input of the linear
 //! system. The error depends on the time-interval set it is meant to
-//! produce, so it is guessed, checked and enlarged until the check passes:
+//! produce, so it is guessed, checked and enlarged until the check passes.
+//! With [`Method::Polynomialization`], the second-order error at the start
+//! set is computed once, as a polynomial zonotope over the set's factors,
+//! and fed in exactly; only the rest is guessed:
 //!
 //! ```mermaid
 //! flowchart LR
-//!     L[linearize at z*] --> R[linear step with error box Ψ̄]
+//!     L[linearize at z*] --> P[static error Ψ_s over X, polynomialization only]
+//!     P --> R[linear step with error box Ψ̄]
 //!     R --> E[error Ψ over the time-interval set]
 //!     E -->|Ψ ⊆ Ψ̄| A[accept, reduce]
 //!     E -->|Ψ ⊄ Ψ̄| W[Ψ̄ := widen Ψ̄ ∪ Ψ]
@@ -26,6 +31,31 @@ use polyzonotope::{Interval, IntervalBox, Reduction, SparsePolyZonotope, Zonotop
 use crate::{Dynamics, LinearReach, LinearSystem, ReachError, ReachFailure, Step};
 
 mod error;
+mod polynomialization;
+
+#[cfg(test)]
+mod ablation;
+
+/// How [`NonlinearReach`] abstracts the dynamics in each step.
+///
+/// Non-exhaustive: more abstractions may be added.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum Method {
+    /// Conservative linearization (Althoff, Stursberg & Buss 2008): the
+    /// whole abstraction error `½ Δzᵀ H(ξ) Δz` over the time-interval set is
+    /// one box, guessed and checked. Needs the Hessians only. The default,
+    /// because every [`Dynamics`] supports it.
+    #[default]
+    Linearization,
+    /// Conservative polynomialization (Althoff 2013): the second-order error
+    /// at the start set stays a polynomial zonotope over the set's factors
+    /// and moves with the set; only what changes during the step and a
+    /// third-order Lagrange remainder go into the box. Needs
+    /// [`Dynamics::third_derivatives`]. Tighter for large sets, since the box
+    /// shrinks from `O(w²)` to `O(w r + w³)` for a set of width `w`.
+    Polynomialization,
+}
 
 /// How [`NonlinearReach`] steps through time.
 #[derive(Clone, Debug, PartialEq)]
@@ -45,11 +75,20 @@ pub struct NonlinearSettings {
     /// Most pieces a set may be split into per time step before a failing
     /// step is refused; 1 never splits.
     pub max_pieces: usize,
+    /// The abstraction of each step.
+    pub method: Method,
+    /// Highest total degree the static error of
+    /// [`Method::Polynomialization`] keeps exact, at least 1. It is
+    /// quadratic in the set, so without a cap the degree of the sets would
+    /// double with every step; higher monomials are enclosed in independent
+    /// generators.
+    pub max_degree: u32,
 }
 
 impl NonlinearSettings {
     /// Defaults for time step `step`: 4 Taylor terms, order 20, 10
-    /// iterations, 10% widening, up to 8 pieces.
+    /// iterations, 10% widening, up to 8 pieces, linearization, and degree
+    /// 4 for polynomialization.
     #[must_use]
     pub fn new(step: f64) -> Self {
         Self {
@@ -59,6 +98,8 @@ impl NonlinearSettings {
             max_iterations: 10,
             enlarge: 0.1,
             max_pieces: 8,
+            method: Method::Linearization,
+            max_degree: 4,
         }
     }
 }
@@ -101,6 +142,9 @@ pub struct NonlinearReach<D> {
 pub(crate) struct Linearization {
     /// The point `z* = (x*, u*)`.
     point: Vec<f64>,
+    /// `x_m`, the middle of the interval hull of the start set, from which
+    /// `x*` is half a step along `f`; `n` entries.
+    middle: Vec<f64>,
     /// `A`, the center of `∂f/∂x` at `z*`.
     a: DMatrix<f64>,
     /// `B`, the center of `∂f/∂u` at `z*`.
@@ -118,7 +162,7 @@ impl<D: Dynamics> NonlinearReach<D> {
     /// # Panics
     ///
     /// Panics if the step is not positive and finite, the order is below 1,
-    /// `enlarge` is negative, or `max_pieces` is zero.
+    /// `enlarge` is negative, or `max_pieces` or `max_degree` is zero.
     #[must_use]
     pub fn new(dynamics: D, settings: NonlinearSettings) -> Self {
         assert!(
@@ -128,13 +172,15 @@ impl<D: Dynamics> NonlinearReach<D> {
         assert!(settings.order >= 1.0, "order must be at least 1");
         assert!(settings.enlarge >= 0.0, "enlarge must not be negative");
         assert!(settings.max_pieces >= 1, "max_pieces must be at least 1");
+        assert!(settings.max_degree >= 1, "max_degree must be at least 1");
 
         Self { dynamics, settings }
     }
 
     /// The reachable sets one step after `x`, for any integrable input
     /// signal with values in `u`; for an autonomous system, `u` is the
-    /// zero-dimensional zonotope.
+    /// zero-dimensional zonotope (or use
+    /// [`step_autonomous`](Self::step_autonomous)).
     ///
     /// Both sets are reduced to the configured order, so the time-point set
     /// can go straight into the next step.
@@ -145,21 +191,49 @@ impl<D: Dynamics> NonlinearReach<D> {
     ///   bound fails for the linearized `A`.
     /// - [`ReachError::AbstractionDiverged`] if no error guess was confirmed
     ///   within `max_iterations`, or the model or the error stopped being
-    ///   finite: the set
-    ///   or the step is too large for the linearization. No set is returned
-    ///   then, since none is proven.
+    ///   finite: the set or the step is too large for the abstraction. No
+    ///   set is returned then, since none is proven.
+    /// - [`ReachError::MissingDerivatives`] with
+    ///   [`Method::Polynomialization`] if the dynamics supply no third
+    ///   derivatives.
     ///
     /// # Panics
     ///
     /// Panics if `x` does not have one row per state or `u` one per input.
     pub fn step(&self, x: &SparsePolyZonotope, u: &Zonotope) -> Result<Step, ReachError> {
-        let n = self.dynamics.states();
-        assert_eq!(x.dim(), n, "x needs one row per state");
+        self.step_with(x, u, Terms::ALL)
+    }
+
+    /// [`step`](Self::step) with only the error terms in `terms`; the tests
+    /// drop one at a time to show that each is needed.
+    fn step_with(
+        &self,
+        x: &SparsePolyZonotope,
+        u: &Zonotope,
+        terms: Terms,
+    ) -> Result<Step, ReachError> {
+        assert_eq!(x.dim(), self.dynamics.states(), "x needs one row per state");
         assert_eq!(u.dim(), self.dynamics.inputs(), "u needs one row per input");
 
         let model = self
             .linearize(x, u)
             .ok_or(ReachError::AbstractionDiverged)?;
+        match self.settings.method {
+            Method::Linearization => self.step_linearized(x, u, &model, terms),
+            Method::Polynomialization => self.step_polynomialized(x, u, &model, terms),
+        }
+    }
+
+    /// One step of [`Method::Linearization`]: the linear model with the
+    /// whole error as a guessed box.
+    fn step_linearized(
+        &self,
+        x: &SparsePolyZonotope,
+        u: &Zonotope,
+        model: &Linearization,
+        terms: Terms,
+    ) -> Result<Step, ReachError> {
+        let n = self.dynamics.states();
         let system = LinearSystem {
             a: model.a.clone(),
             b: DMatrix::identity(n, n),
@@ -167,29 +241,96 @@ impl<D: Dynamics> NonlinearReach<D> {
         let linear = LinearReach::new(system, self.settings.step, self.settings.taylor_terms)?;
         let known = u.linear_map(&model.b);
 
-        let mut assumed = vec![Interval::point(0.0); n];
-        for _ in 0..self.settings.max_iterations {
-            let step = linear.step(x, &with_error(&known, &model.offset, &assumed));
+        self.confirm(n, |assumed| {
+            let step = linear.step(x, &with_error(&known, &model.offset, assumed));
             let states = step
                 .time_interval
                 .reduce(self.settings.order, Reduction::Girard);
-            let Some(actual) = error::abstraction_error(&self.dynamics, &model, &states, u) else {
-                break;
-            };
+            let actual = error::abstraction_error(&self.dynamics, model, (&states, u), terms)
+                .ok_or(ReachError::AbstractionDiverged)?;
+
+            Ok((step.time_point, states, actual))
+        })
+    }
+
+    /// One step of [`Method::Polynomialization`]: the static error `Ψ_s`
+    /// rides along as the constant input of an augmented linear system, and
+    /// only the dynamic error is a guessed box. The soundness argument is in
+    /// the `polynomialization` module.
+    fn step_polynomialized(
+        &self,
+        x: &SparsePolyZonotope,
+        u: &Zonotope,
+        model: &Linearization,
+        terms: Terms,
+    ) -> Result<Step, ReachError> {
+        let n = self.dynamics.states();
+        let limits = (self.settings.max_degree, self.settings.order);
+        let expansion = polynomialization::static_error(&self.dynamics, model, x, limits)?;
+        let start = if terms.has(Term::StaticSet) {
+            x.cartesian_product(&expansion.static_set)
+        } else {
+            x.cartesian_product(&SparsePolyZonotope::from_zonotope(&Zonotope::new(
+                DVector::zeros(n),
+                DMatrix::zeros(n, 0),
+            )))
+        };
+        let system = polynomialization::augmented_system(&model.a);
+        let linear = LinearReach::new(system, self.settings.step, self.settings.taylor_terms)?;
+        let known = u.linear_map(&model.b);
+
+        self.confirm(n, |assumed| {
+            let step = linear.step(&start, &with_error(&known, &model.offset, assumed));
+            let states = polynomialization::project(&step.time_interval, n)
+                .reduce(self.settings.order, Reduction::Girard);
+            let actual = polynomialization::dynamic_error(
+                &self.dynamics,
+                (model, &expansion),
+                (&states, u),
+                self.settings.step,
+                terms,
+            )?;
+
+            Ok((
+                polynomialization::project(&step.time_point, n),
+                states,
+                actual,
+            ))
+        })
+    }
+
+    /// The guess-and-check loop: `attempt` runs the step with the error
+    /// guess `Ψ̄` and returns the time-point set, the reduced time-interval
+    /// set and the error over it. The first attempt whose error lies in its
+    /// guess is accepted; otherwise the guess widens, up to
+    /// `max_iterations` times.
+    ///
+    /// # Errors
+    ///
+    /// The first error of `attempt`, or [`ReachError::AbstractionDiverged`]
+    /// if no guess was confirmed or the guess stopped being finite.
+    fn confirm(
+        &self,
+        n: usize,
+        mut attempt: impl FnMut(
+            &[Interval],
+        ) -> Result<
+            (SparsePolyZonotope, SparsePolyZonotope, Vec<Interval>),
+            ReachError,
+        >,
+    ) -> Result<Step, ReachError> {
+        let mut assumed = vec![Interval::point(0.0); n];
+        for _ in 0..self.settings.max_iterations {
+            let (time_point, time_interval, actual) = attempt(&assumed)?;
             if encloses(&assumed, &actual) {
                 return Ok(Step {
-                    time_point: step
-                        .time_point
-                        .reduce(self.settings.order, Reduction::Girard),
-                    time_interval: states,
+                    time_point: time_point.reduce(self.settings.order, Reduction::Girard),
+                    time_interval,
                 });
             }
 
             assumed = widen(&assumed, &actual, self.settings.enlarge);
-            if !assumed
-                .iter()
-                .all(|iv| iv.lo.is_finite() && iv.hi.is_finite())
-            {
+            if !all_finite(assumed.iter()) {
                 break;
             }
         }
@@ -357,9 +498,59 @@ impl<D: Dynamics> NonlinearReach<D> {
             a: jacobian.columns(0, n).into_owned(),
             b: jacobian.columns(n, point.len() - n).into_owned(),
             point,
+            middle,
             offset,
             jacobian_radius,
         })
+    }
+}
+
+/// One term of the abstraction error, so that the tests can drop it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Term {
+    /// Linearization: `Δzᵀ Q Δz` over the time-interval set.
+    Quadratic,
+    /// Linearization: the spread of `½ H` over the segment box.
+    HessianSpread,
+    /// Both: the spread of the Jacobian at `z*`, from rounding only.
+    JacobianSpread,
+    /// Polynomialization: the static polynomial `Ψ_s = sᵀ Q s`.
+    StaticSet,
+    /// Polynomialization: the spread of `½ H(z*)` around `Q` over `s`, from
+    /// rounding only.
+    StaticRadius,
+    /// Polynomialization: `sᵀ (½H) δ + δᵀ (½H) s`.
+    Cross,
+    /// Polynomialization: `δᵀ (½H) δ`.
+    DynamicQuadratic,
+    /// Polynomialization: the third-order Lagrange remainder.
+    Remainder,
+    /// Polynomialization: the input part `u − u*` of `δ`.
+    InputDeviation,
+}
+
+/// A set of [`Term`]s, as a bit mask.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct Terms(u16);
+
+impl Terms {
+    /// Every term: what the public API always uses.
+    pub(crate) const ALL: Self = Self(u16::MAX);
+
+    /// Whether `term` is in the set.
+    pub(crate) fn has(self, term: Term) -> bool {
+        self.0 & Self::bit(term) != 0
+    }
+
+    /// The set without `term`.
+    #[cfg(test)]
+    pub(crate) fn without(self, term: Term) -> Self {
+        Self(self.0 & !Self::bit(term))
+    }
+
+    /// The bit of `term`.
+    fn bit(term: Term) -> u16 {
+        1 << term as u16
     }
 }
 

@@ -1,14 +1,15 @@
 //! Nonlinear reachability: linear dynamics give the sets of the linear
-//! reach, and trajectories of Van der Pol and a pendulum, integrated with a
-//! fine RK4, stay inside the sets at every step and every sampled time.
+//! reach, and trajectories of Van der Pol, a pendulum, a cubic drift and a
+//! bilinear input system, integrated with a fine RK4, stay inside the sets
+//! at every step and every sampled time, for both abstraction methods.
 
 use core::f64::consts::{FRAC_PI_2, TAU};
 
 use nalgebra::{DMatrix, DVector};
 use polyzonotope::{Interval, IntervalBox, IntervalMatrix, SparsePolyZonotope, Zonotope};
 use polyzonotope_reach::{
-    Dynamics, LinearReach, LinearSystem, NonlinearReach, NonlinearSettings, Polynomial, ReachError,
-    Step,
+    Dynamics, IntervalTensor, LinearReach, LinearSystem, Method, NonlinearReach, NonlinearSettings,
+    Polynomial, ReachError, Step,
 };
 use proptest::collection::vec;
 use proptest::prelude::*;
@@ -65,6 +66,12 @@ impl Dynamics for Pendulum {
         h.0[(0, 0)] = sin(z[0]);
         vec![IntervalMatrix::zeros(3, 3), h]
     }
+
+    fn third_derivatives(&self, z: &[Interval]) -> Option<Vec<IntervalTensor>> {
+        let mut t = IntervalTensor::zeros(3);
+        t[(0, 0, 0)] = cos(z[0]);
+        Some(vec![IntervalTensor::zeros(3), t])
+    }
 }
 
 /// The vector field of [`Pendulum`] in plain `f64`.
@@ -97,14 +104,38 @@ fn cos(iv: Interval) -> Interval {
     ))
 }
 
-/// Settings with step `r` and enough Taylor terms that the remainder of the
-/// matrix exponential is negligible, so that the tests see the abstraction
-/// error and not the slack of the linear part.
-fn sharp(r: f64) -> NonlinearSettings {
+/// Settings with step `r`, abstraction `method` and enough Taylor terms
+/// that the remainder of the matrix exponential is negligible, so that the
+/// tests see the abstraction error and not the slack of the linear part.
+fn sharp(r: f64, method: Method) -> NonlinearSettings {
     NonlinearSettings {
         taylor_terms: 12,
+        method,
         ..NonlinearSettings::new(r)
     }
+}
+
+/// Runs the scenario `$scenario(method: Method)` as one test per method, in
+/// a module `$name` with tests `linearization` and `polynomialization`.
+macro_rules! both_methods {
+    ($name:ident, $scenario:ident) => {
+        /// The scenario of the same name, once per abstraction method.
+        mod $name {
+            use super::*;
+
+            /// With conservative linearization.
+            #[test]
+            fn linearization() {
+                $scenario(Method::Linearization);
+            }
+
+            /// With conservative polynomialization.
+            #[test]
+            fn polynomialization() {
+                $scenario(Method::Polynomialization);
+            }
+        }
+    };
 }
 
 /// The box `center ± radius` as a polynomial zonotope with dependent factors.
@@ -184,10 +215,14 @@ impl Enclosure {
 }
 
 /// Simulates `samples` trajectories from corners and random points of
-/// `center ± radius`, with inputs that jump inside `[-u_radius, u_radius]`
-/// every sub-step, and checks each against every step of `flowpipe`: inside
-/// some piece's time-point set at the step end, and inside some piece's
-/// time-interval set at every sub-step.
+/// `center ± radius` and checks each against every step of `flowpipe`:
+/// inside some piece's time-point set at the step end, and inside some
+/// piece's time-interval set at every sub-step.
+///
+/// Every third sample holds the input at `u_radius`, every third at
+/// `-u_radius`, and the rest jump inside `[-u_radius, u_radius]` every
+/// sub-step. A jumping input averages out, so only the held ones reach the
+/// far edges of the set.
 fn check_trajectories(
     f: fn(&DVector<f64>, f64) -> DVector<f64>,
     flowpipe: &[Vec<Step>],
@@ -218,7 +253,12 @@ fn check_trajectories(
         });
         for (k, pieces) in enclosures.iter().enumerate() {
             for _ in 0..SUBSTEPS {
-                x = rk4(f, &x, u_radius * rng.next(), r / f64::from(SUBSTEPS));
+                let u = match s % 3 {
+                    0 => u_radius,
+                    1 => -u_radius,
+                    _ => u_radius * rng.next(),
+                };
+                x = rk4(f, &x, u, r / f64::from(SUBSTEPS));
                 assert!(
                     pieces.iter().any(|(during, _)| during.holds(&x)),
                     "sample {s} left the time-interval set of step {k} at {x}"
@@ -235,10 +275,9 @@ fn check_trajectories(
 
 /// Van der Pol from a box, with an input: every sampled trajectory stays in
 /// the sets over 0.8 s.
-#[test]
-fn van_der_pol_contains_trajectories() {
+fn van_der_pol_contains_trajectories(method: Method) {
     let (center, radius, u) = ([1.4, 2.4], 0.05, 0.05);
-    let reach = NonlinearReach::new(van_der_pol(), sharp(0.02));
+    let reach = NonlinearReach::new(van_der_pol(), sharp(0.02, method));
     let flowpipe = reach
         .reach(&initial_box(&center, radius), &input(u), 40)
         .expect("converges for this step");
@@ -247,9 +286,8 @@ fn van_der_pol_contains_trajectories() {
 
 /// From a single point and without input, the abstraction error alone has
 /// to carry the curvature of the trajectory.
-#[test]
-fn van_der_pol_contains_a_point_trajectory() {
-    let reach = NonlinearReach::new(van_der_pol(), sharp(0.05));
+fn van_der_pol_contains_a_point_trajectory(method: Method) {
+    let reach = NonlinearReach::new(van_der_pol(), sharp(0.05, method));
     let flowpipe = reach
         .reach(&initial_box(&[1.4, 2.4], 0.0), &input(0.0), 40)
         .expect("converges for this step");
@@ -258,10 +296,9 @@ fn van_der_pol_contains_a_point_trajectory() {
 
 /// The pendulum at large angles, with a torque input: every sampled
 /// trajectory stays in the sets over 1 s.
-#[test]
-fn pendulum_contains_trajectories() {
+fn pendulum_contains_trajectories(method: Method) {
     let (center, radius, u) = ([1.2, 0.0], 0.05, 0.02);
-    let reach = NonlinearReach::new(Pendulum, sharp(0.025));
+    let reach = NonlinearReach::new(Pendulum, sharp(0.025, method));
     let flowpipe = reach
         .reach(&initial_box(&center, radius), &input(u), 40)
         .expect("converges for this step");
@@ -271,8 +308,7 @@ fn pendulum_contains_trajectories() {
 /// `x₀' = x₀³`, `x₁' = −x₁` around the origin: the linearization there is
 /// blind to the cubic, so only the Hessian's spread over the set, not its
 /// value at the center, holds the outward drift.
-#[test]
-fn cubic_drift_is_contained() {
+fn cubic_drift_is_contained(method: Method) {
     /// The vector field in plain `f64`.
     fn cubic(x: &DVector<f64>, _: f64) -> DVector<f64> {
         DVector::from_vec(vec![x[0].powi(3), -x[1]])
@@ -281,7 +317,7 @@ fn cubic_drift_is_contained() {
     let dynamics = Polynomial::new(2, 1)
         .term(0, 1.0, &[3, 0, 0])
         .term(1, -1.0, &[0, 1, 0]);
-    let reach = NonlinearReach::new(dynamics, sharp(0.05));
+    let reach = NonlinearReach::new(dynamics, sharp(0.05, method));
     let flowpipe = reach
         .reach(&initial_box(&[0.0, 0.0], 0.5), &input(0.0), 10)
         .expect("converges for this step");
@@ -289,10 +325,10 @@ fn cubic_drift_is_contained() {
 }
 
 /// A set far too large for the step is refused, not enclosed loosely.
-#[test]
-fn oversized_set_is_refused() {
+fn oversized_set_is_refused(method: Method) {
     let settings = NonlinearSettings {
         max_pieces: 1,
+        method,
         ..NonlinearSettings::new(0.2)
     };
     let reach = NonlinearReach::new(van_der_pol(), settings);
@@ -305,8 +341,7 @@ fn oversized_set_is_refused() {
 
 /// A degree-9 field that overflows `f64` during the error check is
 /// refused, not a panic, even under `sound`.
-#[test]
-fn overflow_is_refused() {
+fn overflow_is_refused(method: Method) {
     let dynamics = Polynomial::autonomous(2)
         .term(0, 1.0, &[9, 0])
         .term(1, -1.0, &[1, 9]);
@@ -314,6 +349,7 @@ fn overflow_is_refused() {
         max_pieces: 4,
         max_iterations: 30,
         enlarge: 10.0,
+        method,
         ..NonlinearSettings::new(0.05)
     };
     let result =
@@ -332,7 +368,7 @@ fn splitting_rescues_a_large_set() {
     let start = initial_box(&center, radius);
     let single = NonlinearSettings {
         max_pieces: 1,
-        ..sharp(r)
+        ..sharp(r, Method::Linearization)
     };
     let unsplit =
         NonlinearReach::new(van_der_pol(), single.clone()).reach(&start, &input(0.0), steps);
@@ -350,6 +386,158 @@ fn splitting_rescues_a_large_set() {
         .expect("splitting makes the step converge");
     assert!(flowpipe.last().expect("nine steps").len() > 1);
     check_trajectories(van_der_pol_f64, &flowpipe, (&center, radius, 0.0), r, 24);
+}
+
+both_methods!(van_der_pol_box, van_der_pol_contains_trajectories);
+both_methods!(van_der_pol_point, van_der_pol_contains_a_point_trajectory);
+both_methods!(pendulum, pendulum_contains_trajectories);
+both_methods!(cubic_drift, cubic_drift_is_contained);
+both_methods!(oversized, oversized_set_is_refused);
+both_methods!(overflow, overflow_is_refused);
+both_methods!(bilinear, bilinear_input_is_contained);
+
+/// `x₀' = x₁`, `x₁' = −x₀ − x₀ u`: a spring whose stiffness the input
+/// modulates. `∂²f/∂x∂u ≠ 0`, so the error has a part from the input
+/// varying during the step, which additive inputs never exercise.
+fn bilinear() -> Polynomial {
+    Polynomial::new(2, 1)
+        .term(0, 1.0, &[0, 1, 0])
+        .term(1, -1.0, &[1, 0, 0])
+        .term(1, -1.0, &[1, 0, 1])
+}
+
+/// The vector field of [`bilinear`] in plain `f64`.
+fn bilinear_f64(x: &DVector<f64>, u: f64) -> DVector<f64> {
+    DVector::from_vec(vec![x[1], -x[0] - x[0] * u])
+}
+
+/// The bilinear spring with a stiffness input jumping in `[-0.5, 0.5]`:
+/// every sampled trajectory stays in the sets over 2 s.
+fn bilinear_input_is_contained(method: Method) {
+    let (center, radius, u) = ([1.0, 0.5], 0.1, 0.5);
+    let reach = NonlinearReach::new(bilinear(), sharp(0.05, method));
+    let flowpipe = reach
+        .reach(&initial_box(&center, radius), &input(u), 40)
+        .expect("converges for this step");
+    check_trajectories(bilinear_f64, &flowpipe, (&center, radius, u), 0.05, 24);
+}
+
+/// From radius 0.5, Van der Pol defeats linearization within a second
+/// without splitting, while polynomialization carries the set through and
+/// still contains every sampled trajectory.
+#[test]
+fn polynomialization_carries_a_large_set() {
+    let (center, radius, r, steps) = ([1.4, 2.4], 0.5, 0.02, 40);
+    let start = initial_box(&center, radius);
+    let settings = |method| NonlinearSettings {
+        max_pieces: 1,
+        ..sharp(r, method)
+    };
+
+    let linearized = NonlinearReach::new(van_der_pol(), settings(Method::Linearization)).reach(
+        &start,
+        &input(0.0),
+        steps,
+    );
+    assert!(linearized.is_err());
+
+    let flowpipe = NonlinearReach::new(van_der_pol(), settings(Method::Polynomialization))
+        .reach(&start, &input(0.0), steps)
+        .expect("polynomialization converges");
+    check_trajectories(van_der_pol_f64, &flowpipe, (&center, radius, 0.0), r, 24);
+}
+
+/// On a set both methods carry, polynomialization's sets are smaller once
+/// the set is wide enough for the quadratic error to dominate.
+#[test]
+fn polynomialization_is_tighter_on_a_wide_set() {
+    let width = |flowpipe: &[Vec<Step>]| -> f64 {
+        let hull = flowpipe.last().expect("steps")[0]
+            .time_point
+            .interval_hull();
+        hull.0.iter().map(Interval::width).sum()
+    };
+    let start = initial_box(&[1.4, 2.4], 0.2);
+    let run = |method| {
+        NonlinearReach::new(van_der_pol(), sharp(0.02, method))
+            .reach(&start, &input(0.0), 40)
+            .expect("converges")
+    };
+
+    let linearized = width(&run(Method::Linearization));
+    let polynomialized = width(&run(Method::Polynomialization));
+    assert!(
+        polynomialized < 0.9 * linearized,
+        "{polynomialized} vs {linearized}"
+    );
+}
+
+/// Dynamics without third derivatives are refused by polynomialization at
+/// once, without spending pieces on splits, and still work with
+/// linearization.
+#[test]
+fn missing_derivatives_are_refused() {
+    /// `x' = −x³` without third derivatives.
+    struct Cubic;
+
+    impl Dynamics for Cubic {
+        fn states(&self) -> usize {
+            1
+        }
+
+        fn inputs(&self) -> usize {
+            0
+        }
+
+        fn flow(&self, z: &[Interval]) -> Vec<Interval> {
+            vec![-(z[0] * z[0] * z[0])]
+        }
+
+        fn jacobian(&self, z: &[Interval]) -> IntervalMatrix {
+            IntervalMatrix(DMatrix::from_element(
+                1,
+                1,
+                Interval::point(-3.0) * z[0] * z[0],
+            ))
+        }
+
+        fn hessians(&self, z: &[Interval]) -> Vec<IntervalMatrix> {
+            vec![IntervalMatrix(DMatrix::from_element(
+                1,
+                1,
+                Interval::point(-6.0) * z[0],
+            ))]
+        }
+    }
+
+    let start = initial_box(&[1.0], 0.1);
+    let failure = NonlinearReach::new(Cubic, sharp(0.05, Method::Polynomialization))
+        .reach_autonomous(&start, 3)
+        .expect_err("no third derivatives");
+    assert_eq!(failure.error, ReachError::MissingDerivatives);
+    assert_eq!(failure.proven, Vec::<Vec<Step>>::new());
+
+    let flowpipe = NonlinearReach::new(Cubic, sharp(0.05, Method::Linearization))
+        .reach_autonomous(&start, 3)
+        .expect("linearization needs only the Hessians");
+    assert_eq!(flowpipe.len(), 3);
+}
+
+/// The static error is quadratic in the set, so without the cap the degree
+/// would double every step; over 60 steps it stays at `max_degree`.
+#[test]
+fn degree_stays_capped() {
+    let settings = NonlinearSettings {
+        max_degree: 3,
+        ..sharp(0.02, Method::Polynomialization)
+    };
+    let flowpipe = NonlinearReach::new(van_der_pol(), settings)
+        .reach(&initial_box(&[1.4, 2.4], 0.2), &input(0.05), 60)
+        .expect("converges");
+    for step in flowpipe.iter().flatten() {
+        let e = step.time_point.exponents();
+        assert!((0..e.ncols()).all(|j| e.column(j).sum() <= 3));
+    }
 }
 
 /// A random linear system `x' = A x + B u` with two states and one input,
@@ -403,6 +591,27 @@ proptest! {
         prop_assert!(same_hull(&actual.time_point, &expected.time_point, 1e-9));
         prop_assert!(same_hull(&actual.time_interval, &expected.time_interval, 1e-9));
     }
+
+    /// The same for polynomialization, whose step runs on a system
+    /// augmented with the static error: with no error, the augmentation
+    /// must not change the sets. 12 Taylor terms, since the augmented `A`
+    /// has a larger norm and so a larger remainder.
+    #[test]
+    fn linear_dynamics_match_linear_reach_polynomialized(
+        (dynamics, system) in arb_linear(),
+        center in vec(-1.0..1.0f64, 2),
+        u_center in -1.0..1.0f64,
+    ) {
+        let r = 0.05;
+        let x = initial_box(&center, 0.1);
+        let u = Zonotope::new(DVector::from_element(1, u_center), DMatrix::from_element(1, 1, 0.1));
+        let settings = NonlinearSettings { order: 1e6, ..sharp(r, Method::Polynomialization) };
+
+        let expected = LinearReach::new(system, r, settings.taylor_terms).expect("small step").step(&x, &u);
+        let actual = NonlinearReach::new(dynamics, settings).step(&x, &u).expect("no error to bound");
+        prop_assert!(same_hull(&actual.time_point, &expected.time_point, 1e-9));
+        prop_assert!(same_hull(&actual.time_interval, &expected.time_interval, 1e-9));
+    }
 }
 
 /// A run that fails part-way hands back the steps it proved, and they
@@ -411,7 +620,7 @@ proptest! {
 fn failure_keeps_the_proven_steps() {
     let settings = NonlinearSettings {
         max_pieces: 1,
-        ..sharp(0.02)
+        ..sharp(0.02, Method::Linearization)
     };
     let reach = NonlinearReach::new(van_der_pol(), settings);
     let start = initial_box(&[1.4, 2.4], 1.0);
@@ -435,7 +644,7 @@ fn autonomous_helpers_match_an_empty_input() {
         .term(1, 1.0, &[0, 1])
         .term(1, -1.0, &[2, 1])
         .term(1, -1.0, &[1, 0]);
-    let reach = NonlinearReach::new(vdp, sharp(0.02));
+    let reach = NonlinearReach::new(vdp, sharp(0.02, Method::Linearization));
     let start = initial_box(&[1.4, 2.4], 0.05);
     let empty = Zonotope::new(DVector::zeros(0), DMatrix::zeros(0, 0));
     let helper = reach.reach_autonomous(&start, 3).expect("small set");

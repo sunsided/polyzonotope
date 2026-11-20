@@ -134,7 +134,7 @@ fn point_response(m: &IntervalMatrix, v: &DVector<f64>) -> SparsePolyZonotope {
 
 /// A zonotope as a polynomial zonotope with independent generators only, so
 /// that its parts never correlate with anything else.
-fn without_factors(z: &Zonotope) -> SparsePolyZonotope {
+pub(crate) fn without_factors(z: &Zonotope) -> SparsePolyZonotope {
     SparsePolyZonotope::new(
         z.center().clone(),
         DMatrix::zeros(z.dim(), 0),

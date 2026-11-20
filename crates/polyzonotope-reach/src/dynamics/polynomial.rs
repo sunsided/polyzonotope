@@ -6,12 +6,12 @@ use alloc::vec::Vec;
 use nalgebra::DMatrix;
 use polyzonotope::{Interval, IntervalMatrix};
 
-use super::Dynamics;
+use super::{Dynamics, IntervalTensor};
 
 /// Polynomial dynamics: each `f_i(z)` is a sum of terms `c · Π_j z_j^{e_j}`
 /// over `z = (x, u)`.
 ///
-/// The Jacobian and Hessians are derived term by term, so only `f` has to be
+/// The Jacobian, the Hessians and the third derivatives are derived term by term, so only `f` has to be
 /// written down. Every evaluation runs in interval arithmetic, outward
 /// rounded with the `sound` feature, and even powers of an interval that
 /// spans zero start at zero.
@@ -131,6 +131,40 @@ impl Polynomial {
     }
 }
 
+impl Polynomial {
+    /// `∂³f_row/∂z³` over the box `z`. Only the entries with `a ≤ b ≤ c`
+    /// are evaluated; the others are copies, since mixed partial derivatives
+    /// of a polynomial commute.
+    fn third_derivative(&self, row: usize, z: &[Interval]) -> IntervalTensor {
+        let w = self.width();
+        let mut t = IntervalTensor::zeros(w);
+        for a in 0..w {
+            for b in a..w {
+                for c in b..w {
+                    let value = self.evaluate(row, &[a, b, c], z);
+                    for at in permutations(a, b, c) {
+                        t[at] = value;
+                    }
+                }
+            }
+        }
+
+        t
+    }
+}
+
+/// The six orderings of `(a, b, c)`, repeats included.
+fn permutations(a: usize, b: usize, c: usize) -> [(usize, usize, usize); 6] {
+    [
+        (a, b, c),
+        (a, c, b),
+        (b, a, c),
+        (b, c, a),
+        (c, a, b),
+        (c, b, a),
+    ]
+}
+
 impl Dynamics for Polynomial {
     fn states(&self) -> usize {
         self.states
@@ -155,6 +189,14 @@ impl Dynamics for Polynomial {
         (0..self.states)
             .map(|i| IntervalMatrix(DMatrix::from_fn(w, w, |a, b| self.evaluate(i, &[a, b], z))))
             .collect()
+    }
+
+    fn third_derivatives(&self, z: &[Interval]) -> Option<Vec<IntervalTensor>> {
+        Some(
+            (0..self.states)
+                .map(|i| self.third_derivative(i, z))
+                .collect(),
+        )
     }
 }
 
@@ -240,6 +282,27 @@ mod tests {
         assert_eq!(h.0[(0, 1)], Interval::point(4.0));
         assert_eq!(h.0[(1, 0)], Interval::point(4.0));
         assert_eq!(h.0[(1, 1)], Interval::point(0.0));
+    }
+
+    /// The third derivatives of `x₀² x₁ + x₀³ x₁²` match the hand-computed
+    /// ones at a point, in every ordering of the indices.
+    #[test]
+    fn third_derivatives_match_by_hand() {
+        let p = Polynomial::new(1, 1)
+            .term(0, 1.0, &[2, 1])
+            .term(0, 1.0, &[3, 2]);
+        let z = [Interval::point(2.0), Interval::point(3.0)];
+        let t = &p.third_derivatives(&z).expect("polynomials supply them")[0];
+
+        // ∂³/∂x₀³ = 6 x₁², ∂³/∂x₀²∂x₁ = 2 + 12 x₀ x₁, ∂³/∂x₀∂x₁² = 6 x₀², ∂³/∂x₁³ = 0.
+        assert_eq!(t[(0, 0, 0)], Interval::point(54.0));
+        for at in [(0, 0, 1), (0, 1, 0), (1, 0, 0)] {
+            assert_eq!(t[at], Interval::point(74.0));
+        }
+        for at in [(0, 1, 1), (1, 0, 1), (1, 1, 0)] {
+            assert_eq!(t[at], Interval::point(24.0));
+        }
+        assert_eq!(t[(1, 1, 1)], Interval::point(0.0));
     }
 
     /// A value too large for `f64` gives the whole real line, not a panic.

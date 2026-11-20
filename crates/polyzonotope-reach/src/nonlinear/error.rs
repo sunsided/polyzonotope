@@ -8,22 +8,25 @@
 //! `ρ = |Δz|ᵀ R_H |Δz| + R_J |Δz|`. The quadratic part stays a polynomial
 //! zonotope, so its hull sees products of the same factor; only the radii go
 //! through intervals.
+//!
+//! This is the error of [`Method::Linearization`](crate::Method::Linearization).
 
 use alloc::vec::Vec;
 
 use nalgebra::DMatrix;
 use polyzonotope::{Interval, IntervalBox, IntervalMatrix, SparsePolyZonotope, Zonotope};
 
-use super::{Linearization, all_finite};
+use super::{Linearization, Term, Terms, all_finite};
 use crate::Dynamics;
 
 /// An interval enclosure of the abstraction error over `states × u`, one
-/// interval per state; `None` if a bound is not finite.
+/// interval per state, with the terms `terms` selects (all of them, outside
+/// the tests); `None` if a bound is not finite.
 pub(super) fn abstraction_error<D: Dynamics>(
     dynamics: &D,
     model: &Linearization,
-    states: &SparsePolyZonotope,
-    u: &Zonotope,
+    (states, u): (&SparsePolyZonotope, &Zonotope),
+    terms: Terms,
 ) -> Option<Vec<Interval>> {
     let deviation = deviation(states, u, &model.point);
     let hull = deviation.interval_hull();
@@ -48,8 +51,21 @@ pub(super) fn abstraction_error<D: Dynamics>(
         .iter()
         .enumerate()
         .map(|(i, &q)| {
-            let rho = remainder_radius(&radii[i], &model.jacobian_radius, i, &magnitude);
-            q + Interval { lo: -rho, hi: rho }
+            let parts = [
+                (Term::Quadratic, q),
+                (
+                    Term::HessianSpread,
+                    symmetric(hessian_radius(&radii[i], &magnitude)),
+                ),
+                (
+                    Term::JacobianSpread,
+                    symmetric(jacobian_radius(&model.jacobian_radius, i, &magnitude)),
+                ),
+            ];
+            parts
+                .iter()
+                .filter(|(term, _)| terms.has(*term))
+                .fold(Interval::point(0.0), |acc, &(_, v)| acc + v)
         })
         .collect();
 
@@ -57,7 +73,11 @@ pub(super) fn abstraction_error<D: Dynamics>(
 }
 
 /// `Δz = (x − x*, u − u*)` over `states × u`, as one polynomial zonotope.
-fn deviation(states: &SparsePolyZonotope, u: &Zonotope, point: &[f64]) -> SparsePolyZonotope {
+pub(super) fn deviation(
+    states: &SparsePolyZonotope,
+    u: &Zonotope,
+    point: &[f64],
+) -> SparsePolyZonotope {
     let n = states.dim();
     let shift = |v: &[f64]| -nalgebra::DVector::from_column_slice(v);
     let dx = states.translate(&shift(&point[..n]));
@@ -70,7 +90,7 @@ fn deviation(states: &SparsePolyZonotope, u: &Zonotope, point: &[f64]) -> Sparse
 
 /// A box that holds every segment from `z*` to a point of `z* + hull`: the
 /// hull joined with zero, shifted by `z*`.
-fn segment_box(hull: &IntervalBox, point: &[f64]) -> Vec<Interval> {
+pub(super) fn segment_box(hull: &IntervalBox, point: &[f64]) -> Vec<Interval> {
     hull.0
         .iter()
         .zip(point)
@@ -78,23 +98,29 @@ fn segment_box(hull: &IntervalBox, point: &[f64]) -> Vec<Interval> {
         .collect()
 }
 
-/// `ρ_i = |Δz|ᵀ R_H |Δz| + Σ_j R_J[i, j] |Δz_j|`, rounded up.
-fn remainder_radius(
-    hessian: &DMatrix<f64>,
-    jacobian: &DMatrix<f64>,
-    row: usize,
-    magnitude: &[Interval],
-) -> f64 {
-    let quadratic = (0..magnitude.len()).fold(Interval::point(0.0), |acc, a| {
-        (0..magnitude.len()).fold(acc, |acc, b| {
-            acc + Interval::point(hessian[(a, b)]) * magnitude[a] * magnitude[b]
+/// `|Δz|ᵀ R_H |Δz|`, rounded up: the spread of `½ H` over the segment box.
+fn hessian_radius(hessian: &DMatrix<f64>, magnitude: &[Interval]) -> f64 {
+    (0..magnitude.len())
+        .fold(Interval::point(0.0), |acc, a| {
+            (0..magnitude.len()).fold(acc, |acc, b| {
+                acc + Interval::point(hessian[(a, b)]) * magnitude[a] * magnitude[b]
+            })
         })
-    });
-    let linear = (0..magnitude.len()).fold(quadratic, |acc, j| {
-        acc + Interval::point(jacobian[(row, j)]) * magnitude[j]
-    });
+        .hi
+}
 
-    linear.hi
+/// `Σ_j R_J[row, j] |Δz_j|`, rounded up: the spread of the Jacobian at `z*`.
+fn jacobian_radius(jacobian: &DMatrix<f64>, row: usize, magnitude: &[Interval]) -> f64 {
+    (0..magnitude.len())
+        .fold(Interval::point(0.0), |acc, j| {
+            acc + Interval::point(jacobian[(row, j)]) * magnitude[j]
+        })
+        .hi
+}
+
+/// `[−r, r]`.
+fn symmetric(r: f64) -> Interval {
+    Interval::new(-r, r)
 }
 
 /// Largest `|Δz|ᵀ |H| |Δz|` the error may reach: far beyond any useful

@@ -1,13 +1,15 @@
-//! Nonlinear dynamics `x' = f(x, u)` with their first and second
-//! derivatives, all enclosed in interval arithmetic.
+//! Nonlinear dynamics `x' = f(x, u)` with their first, second and
+//! (optionally) third derivatives, all enclosed in interval arithmetic.
 
 use alloc::vec::Vec;
 
 use polyzonotope::{Interval, IntervalMatrix};
 
 mod polynomial;
+mod tensor;
 
 pub use polynomial::Polynomial;
+pub use tensor::IntervalTensor;
 
 /// A vector field `x' = f(x, u)` that can be enclosed over boxes.
 ///
@@ -72,4 +74,18 @@ pub trait Dynamics {
 
     /// The Hessians `∂²f_i/∂z²`, one `(n + m) × (n + m)` matrix per state `i`.
     fn hessians(&self, z: &[Interval]) -> Vec<IntervalMatrix>;
+
+    /// The third derivatives `∂³f_i/∂z³`, one `(n + m)³` tensor per state
+    /// `i`, or `None` if the dynamics do not supply them.
+    ///
+    /// Only [`Method::Polynomialization`](crate::Method::Polynomialization)
+    /// needs them, for its third-order Lagrange remainder; without them it
+    /// refuses with
+    /// [`ReachError::MissingDerivatives`](crate::ReachError::MissingDerivatives).
+    /// The default returns `None`, so existing implementations keep working
+    /// with [`Method::Linearization`](crate::Method::Linearization).
+    fn third_derivatives(&self, z: &[Interval]) -> Option<Vec<IntervalTensor>> {
+        let _ = z;
+        None
+    }
 }
