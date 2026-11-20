@@ -229,3 +229,18 @@ fn split_hull_skips_unsplittable_factors() {
 
     assert_eq!(pz.interval_hull_split(1e-6, 10), pz.interval_hull());
 }
+
+/// Checks against a set whose only factor cannot be split never split it:
+/// they give the same answer with a budget as without, instead of panicking.
+#[test]
+fn checks_skip_unsplittable_factors() {
+    let pz = power(57);
+    for h in [
+        halfspace_1d(-1.0, -0.5),
+        halfspace_1d(1.0, 0.5),
+        halfspace_1d(1.0, 2.0),
+    ] {
+        assert_eq!(pz.intersection(&h, 10), pz.intersection(&h, 0));
+        assert_eq!(pz.containment(&h, 10), pz.containment(&h, 0));
+    }
+}

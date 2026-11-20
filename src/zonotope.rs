@@ -174,7 +174,7 @@ impl Zonotope {
 
     /// Whether the zonotope meets the polytope `p`; see
     /// [`SparsePolyZonotope::intersection`]. Against a single halfspace the
-    /// answer is definite without any splits.
+    /// answer is definite without any splits, up to rounding at the boundary.
     ///
     /// # Panics
     ///
