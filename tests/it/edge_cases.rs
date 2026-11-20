@@ -263,3 +263,21 @@ fn checks_skip_unsplittable_factors() {
         assert_eq!(pz.containment(&h, 10), pz.containment(&h, 0));
     }
 }
+
+/// `α⁵⁷ + β − β²` never reaches 1.5 (its maximum is 1.25). Splitting only `β`,
+/// the factor `split` accepts, is enough to prove it.
+#[test]
+fn checks_split_the_splittable_factor() {
+    let pz = SparsePolyZonotope::new(
+        DVector::zeros(1),
+        DMatrix::from_row_slice(1, 3, &[1.0, 1.0, -1.0]),
+        DMatrix::zeros(1, 0),
+        DMatrix::from_row_slice(2, 3, &[57, 0, 0, 0, 1, 2]),
+        FactorId::fresh_n(2),
+    )
+    .expect("consistent shapes");
+    let above = halfspace_1d(-1.0, -1.5);
+
+    assert_eq!(pz.intersection(&above, 0), Intersection::Unknown);
+    assert_eq!(pz.intersection(&above, 50), Intersection::Disjoint);
+}
