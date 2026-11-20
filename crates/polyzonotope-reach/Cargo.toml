@@ -1,0 +1,25 @@
+[package]
+name = "polyzonotope-reach"
+description = "Validated reachable-set over-approximation of nonlinear dynamics with polynomial zonotopes"
+version = "0.0.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+rust-version = "1.89"
+repository = "https://github.com/sunsided/polyzonotope"
+readme = "README.md"
+keywords = ["reachability", "zonotope", "verification", "set-based", "dynamics"]
+categories = ["mathematics", "science", "no-std"]
+# Not released from this workspace until milestone 1 lands (0.0.0 holds the name on crates.io).
+publish = false
+
+[dependencies]
+polyzonotope = { version = "0.2", path = "../..", default-features = false }
+
+[features]
+default = ["std"]
+std = ["polyzonotope/std"]
+# Outward rounding, see the polyzonotope crate's `sound` feature.
+sound = ["std", "polyzonotope/sound"]
+
+[lints]
+workspace = true
