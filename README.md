@@ -141,7 +141,7 @@ rustflags = ["-C", "target-cpu=haswell"]
 ```
 
 ## Roadmap
-1. Separate `polyzonotope-reach` crate: nonlinear reachability by conservative polynomialization (Althoff 2013), with a CORA cross-check of the reachable sets.
+1. [`polyzonotope-reach`](https://github.com/sunsided/polyzonotope/tree/main/crates/polyzonotope-reach) (in this workspace): nonlinear reachability by conservative polynomialization (Althoff 2013), with a CORA cross-check of the reachable sets.
 
 ## License
 

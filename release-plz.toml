@@ -13,7 +13,7 @@ git_release_type = "auto"
 # Release PR branches follow the branching model (release/*), not the default `release-plz-`.
 pr_branch_prefix = "release/"
 # Imperative PR title (the default is "chore: release v..."); squash merges use it as the subject,
-# and the changelog parser skips it via ^Release. Single crate: {{ version }} is always set.
+# and the changelog parser skips it via ^Release. One released crate: {{ version }} is always set.
 pr_name = "Release v{{ version }}"
 # Commits are imperative ("Add X", "Fix Y"), not Conventional Commits: map verbs to bumps.
 custom_minor_increment_regex = "^(Add|Introduce|Support|Allow|Implement|Expose)\\b"
@@ -34,6 +34,16 @@ commit_parsers = [
   { message = "^((Cargo|npm|Docker): )?Bump\\b", group = "Dependencies" },
   { message = "^.*", group = "Changed" },
 ]
+
+# The main crate keeps plain vX.Y.Z tags; publish-crates-io.yml maps those to polyzonotope.
+[[package]]
+name = "polyzonotope"
+git_tag_name = "v{{ version }}"
+
+# Not released yet (publish = false in its Cargo.toml); enable together with its first release.
+[[package]]
+name = "polyzonotope-reach"
+release = false
 
 # Per-crate overrides. Examples:
 # [[package]]
