@@ -10,7 +10,7 @@ use polyzonotope_reach::{NonlinearReach, NonlinearSettings, Polynomial};
 /// Runs every benchmark in this file with criterion's command-line flags.
 fn main() {
     let mut criterion = Criterion::default().configure_from_args();
-    let vdp = Polynomial::new(2, 0)
+    let vdp = Polynomial::autonomous(2)
         .term(0, 1.0, &[0, 1])
         .term(1, 1.0, &[0, 1])
         .term(1, -1.0, &[2, 1])
@@ -20,13 +20,12 @@ fn main() {
         DVector::from_vec(vec![1.4, 2.4]),
         DMatrix::from_diagonal_element(2, 2, 0.05),
     ));
-    let no_input = Zonotope::new(DVector::zeros(0), DMatrix::zeros(0, 0));
 
     criterion.bench_function("van_der_pol/step", |b| {
-        b.iter(|| reach.step(black_box(&start), &no_input));
+        b.iter(|| reach.step_autonomous(black_box(&start)));
     });
     criterion.bench_function("van_der_pol/reach_50", |b| {
-        b.iter(|| reach.reach(black_box(&start), &no_input, 50));
+        b.iter(|| reach.reach_autonomous(black_box(&start), 50));
     });
     criterion.final_summary();
 }

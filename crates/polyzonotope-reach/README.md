@@ -53,7 +53,7 @@ use polyzonotope::{SparsePolyZonotope, Zonotope};
 use polyzonotope_reach::{NonlinearReach, NonlinearSettings, Polynomial};
 
 // Van der Pol: x₀' = x₁, x₁' = (1 − x₀²) x₁ − x₀.
-let vdp = Polynomial::new(2, 0)
+let vdp = Polynomial::autonomous(2)
     .term(0, 1.0, &[0, 1])
     .term(1, 1.0, &[0, 1])
     .term(1, -1.0, &[2, 1])
@@ -63,14 +63,13 @@ let start = SparsePolyZonotope::from_zonotope(&Zonotope::new(
     DVector::from_vec(vec![1.4, 2.4]),
     DMatrix::from_diagonal_element(2, 2, 0.05),
 ));
-let no_input = Zonotope::new(DVector::zeros(0), DMatrix::zeros(0, 0));
 
-let flowpipe = reach.reach(&start, &no_input, 50)?;
+let flowpipe = reach.reach_autonomous(&start, 50)?;
 assert_eq!(flowpipe.len(), 50);
-# Ok::<(), polyzonotope_reach::ReachError>(())
+# Ok::<(), polyzonotope_reach::ReachFailure>(())
 ```
 
-A refusal means that no set was proven for that step. The crate does not hand back a set it could not confirm.
+A refusal means that no set was proven for that step. The crate does not hand back a set it could not confirm. `reach` returns a `ReachFailure` then, which holds the steps proven before the failing one and the `ReachError` that stopped it. `ReachError` is `#[non_exhaustive]`.
 
 ## Soundness
 

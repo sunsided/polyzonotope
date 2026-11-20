@@ -17,7 +17,11 @@ pub use linear::{LinearReach, LinearSystem, Step};
 pub use nonlinear::{NonlinearReach, NonlinearSettings};
 
 /// Why a reachability computation could not produce a sound result.
+///
+/// Non-exhaustive: new ways to refuse may be added without a breaking
+/// release, so match with a wildcard arm.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum ReachError {
     /// The time step is negative, infinite or NaN; the remainder bound needs
     /// a finite `r >= 0`.
@@ -43,3 +47,31 @@ impl core::fmt::Display for ReachError {
 }
 
 impl core::error::Error for ReachError {}
+
+/// A multi-step computation that stopped early, with everything it proved
+/// before the failing step.
+///
+/// Returned by [`NonlinearReach::reach`]: the sets in `proven` are as sound
+/// as those of a complete run, they just end before the requested horizon.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ReachFailure {
+    /// The completed steps, in order: entry `k` holds the pieces of step `k`,
+    /// exactly as a successful run would have returned them. A step that
+    /// failed for any of its pieces is left out entirely, so this is shorter
+    /// than the requested horizon and may be empty.
+    pub proven: alloc::vec::Vec<alloc::vec::Vec<Step>>,
+    /// Why the next step could not be proven.
+    pub error: ReachError,
+}
+
+impl core::fmt::Display for ReachFailure {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "{} after {} proven steps", self.error, self.proven.len())
+    }
+}
+
+impl core::error::Error for ReachFailure {
+    fn source(&self) -> Option<&(dyn core::error::Error + 'static)> {
+        Some(&self.error)
+    }
+}

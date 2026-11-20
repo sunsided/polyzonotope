@@ -20,10 +20,10 @@
 use alloc::vec;
 use alloc::vec::Vec;
 
-use nalgebra::DMatrix;
+use nalgebra::{DMatrix, DVector};
 use polyzonotope::{Interval, IntervalBox, Reduction, SparsePolyZonotope, Zonotope};
 
-use crate::{Dynamics, LinearReach, LinearSystem, ReachError, Step};
+use crate::{Dynamics, LinearReach, LinearSystem, ReachError, ReachFailure, Step};
 
 mod error;
 
@@ -73,7 +73,7 @@ impl NonlinearSettings {
 /// use polyzonotope_reach::{NonlinearReach, NonlinearSettings, Polynomial};
 ///
 /// // Van der Pol with μ = 1, no inputs.
-/// let vdp = Polynomial::new(2, 0)
+/// let vdp = Polynomial::autonomous(2)
 ///     .term(0, 1.0, &[0, 1])
 ///     .term(1, 1.0, &[0, 1])
 ///     .term(1, -1.0, &[2, 1])
@@ -83,12 +83,11 @@ impl NonlinearSettings {
 ///     DVector::from_vec(vec![1.4, 2.4]),
 ///     DMatrix::from_diagonal_element(2, 2, 0.05),
 /// ));
-/// let no_input = Zonotope::new(DVector::zeros(0), DMatrix::zeros(0, 0));
 ///
-/// let flowpipe = reach.reach(&start, &no_input, 10)?;
+/// let flowpipe = reach.reach_autonomous(&start, 10)?;
 /// let hull = flowpipe[9][0].time_point.interval_hull();
 /// assert!(hull.0[0].lo > 1.4 && hull.0[1].hi < 2.4);
-/// # Ok::<(), polyzonotope_reach::ReachError>(())
+/// # Ok::<(), polyzonotope_reach::ReachFailure>(())
 /// ```
 pub struct NonlinearReach<D> {
     /// The vector field.
@@ -209,8 +208,8 @@ impl<D: Dynamics> NonlinearReach<D> {
     ///
     /// # Errors
     ///
-    /// The first error of [`step`](Self::step) that splitting could not
-    /// avoid; no partial flowpipe is returned.
+    /// A [`ReachFailure`] with the first error of [`step`](Self::step) that
+    /// splitting could not avoid, and every step proven before it.
     ///
     /// # Panics
     ///
@@ -220,16 +219,73 @@ impl<D: Dynamics> NonlinearReach<D> {
         x0: &SparsePolyZonotope,
         u: &Zonotope,
         steps: usize,
-    ) -> Result<Vec<Vec<Step>>, ReachError> {
+    ) -> Result<Vec<Vec<Step>>, ReachFailure> {
         let mut pieces = vec![x0.clone()];
         let mut flowpipe = Vec::with_capacity(steps);
         for _ in 0..steps {
-            let next = self.advance(pieces, u)?;
+            let next = match self.advance(pieces, u) {
+                Ok(next) => next,
+                Err(error) => {
+                    return Err(ReachFailure {
+                        proven: flowpipe,
+                        error,
+                    });
+                }
+            };
             pieces = next.iter().map(|s| s.time_point.clone()).collect();
             flowpipe.push(next);
         }
 
         Ok(flowpipe)
+    }
+
+    /// [`step`](Self::step) for an autonomous system `x' = f(x)`, without
+    /// building the zero-dimensional input set.
+    ///
+    /// # Errors
+    ///
+    /// As for [`step`](Self::step).
+    ///
+    /// # Panics
+    ///
+    /// Panics if the dynamics have inputs, or `x` does not have one row per
+    /// state.
+    pub fn step_autonomous(&self, x: &SparsePolyZonotope) -> Result<Step, ReachError> {
+        self.step(x, &self.no_input())
+    }
+
+    /// [`reach`](Self::reach) for an autonomous system `x' = f(x)`, without
+    /// building the zero-dimensional input set.
+    ///
+    /// # Errors
+    ///
+    /// As for [`reach`](Self::reach).
+    ///
+    /// # Panics
+    ///
+    /// Panics if the dynamics have inputs, or `x0` does not have one row per
+    /// state.
+    pub fn reach_autonomous(
+        &self,
+        x0: &SparsePolyZonotope,
+        steps: usize,
+    ) -> Result<Vec<Vec<Step>>, ReachFailure> {
+        self.reach(x0, &self.no_input(), steps)
+    }
+
+    /// The zero-dimensional input set of an autonomous system.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the dynamics have inputs: dropping them silently would
+    /// compute the sets for `u = 0` only.
+    fn no_input(&self) -> Zonotope {
+        assert_eq!(
+            self.dynamics.inputs(),
+            0,
+            "an autonomous step needs dynamics without inputs"
+        );
+        Zonotope::new(DVector::zeros(0), DMatrix::zeros(0, 0))
     }
 
     /// One step for every piece in `todo`, splitting pieces that diverge.

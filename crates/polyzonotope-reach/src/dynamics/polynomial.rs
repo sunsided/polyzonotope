@@ -73,6 +73,13 @@ impl Polynomial {
         }
     }
 
+    /// The zero vector field of an autonomous system `x' = f(x)` with
+    /// `states` states; the same as `new(states, 0)`.
+    #[must_use]
+    pub fn autonomous(states: usize) -> Self {
+        Self::new(states, 0)
+    }
+
     /// Adds `coefficient · Π_j z_j^{exponents[j]}` to `f_row`, where
     /// `z = (x, u)`.
     ///

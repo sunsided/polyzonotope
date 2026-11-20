@@ -297,14 +297,17 @@ fn oversized_set_is_refused() {
     };
     let reach = NonlinearReach::new(van_der_pol(), settings);
     let result = reach.reach(&initial_box(&[1.4, 2.4], 3.0), &input(0.0), 5);
-    assert_eq!(result.err(), Some(ReachError::AbstractionDiverged));
+    assert_eq!(
+        result.err().map(|f| f.error),
+        Some(ReachError::AbstractionDiverged)
+    );
 }
 
 /// A degree-9 field that overflows `f64` during the error check is
 /// refused, not a panic, even under `sound`.
 #[test]
 fn overflow_is_refused() {
-    let dynamics = Polynomial::new(2, 0)
+    let dynamics = Polynomial::autonomous(2)
         .term(0, 1.0, &[9, 0])
         .term(1, -1.0, &[1, 9]);
     let settings = NonlinearSettings {
@@ -313,12 +316,12 @@ fn overflow_is_refused() {
         enlarge: 10.0,
         ..NonlinearSettings::new(0.05)
     };
-    let result = NonlinearReach::new(dynamics, settings).reach(
-        &initial_box(&[0.0, 0.0], 1.0),
-        &Zonotope::new(DVector::zeros(0), DMatrix::zeros(0, 0)),
-        5,
+    let result =
+        NonlinearReach::new(dynamics, settings).reach_autonomous(&initial_box(&[0.0, 0.0], 1.0), 5);
+    assert_eq!(
+        result.err().map(|f| f.error),
+        Some(ReachError::AbstractionDiverged)
     );
-    assert_eq!(result.err(), Some(ReachError::AbstractionDiverged));
 }
 
 /// Splitting carries a large set through a step that one piece cannot,
@@ -333,7 +336,10 @@ fn splitting_rescues_a_large_set() {
     };
     let unsplit =
         NonlinearReach::new(van_der_pol(), single.clone()).reach(&start, &input(0.0), steps);
-    assert_eq!(unsplit.err(), Some(ReachError::AbstractionDiverged));
+    assert_eq!(
+        unsplit.err().map(|f| f.error),
+        Some(ReachError::AbstractionDiverged)
+    );
 
     let split = NonlinearSettings {
         max_pieces: 8,
@@ -397,4 +403,55 @@ proptest! {
         prop_assert!(same_hull(&actual.time_point, &expected.time_point, 1e-9));
         prop_assert!(same_hull(&actual.time_interval, &expected.time_interval, 1e-9));
     }
+}
+
+/// A run that fails part-way hands back the steps it proved, and they
+/// match the first steps of a run that stops before the failure.
+#[test]
+fn failure_keeps_the_proven_steps() {
+    let settings = NonlinearSettings {
+        max_pieces: 1,
+        ..sharp(0.02)
+    };
+    let reach = NonlinearReach::new(van_der_pol(), settings);
+    let start = initial_box(&[1.4, 2.4], 1.0);
+    let failure = reach
+        .reach(&start, &input(0.0), 9)
+        .expect_err("diverges unsplit");
+    assert_eq!(failure.error, ReachError::AbstractionDiverged);
+    assert!(failure.proven.len() < 9);
+
+    let shorter = reach
+        .reach(&start, &input(0.0), failure.proven.len())
+        .expect("the proven prefix succeeds");
+    assert!(same_flowpipe(&shorter, &failure.proven));
+}
+
+/// The autonomous helpers give the same sets as an explicit empty input.
+#[test]
+fn autonomous_helpers_match_an_empty_input() {
+    let vdp = Polynomial::autonomous(2)
+        .term(0, 1.0, &[0, 1])
+        .term(1, 1.0, &[0, 1])
+        .term(1, -1.0, &[2, 1])
+        .term(1, -1.0, &[1, 0]);
+    let reach = NonlinearReach::new(vdp, sharp(0.02));
+    let start = initial_box(&[1.4, 2.4], 0.05);
+    let empty = Zonotope::new(DVector::zeros(0), DMatrix::zeros(0, 0));
+    let helper = reach.reach_autonomous(&start, 3).expect("small set");
+    let explicit = reach.reach(&start, &empty, 3).expect("small set");
+    assert!(same_flowpipe(&helper, &explicit));
+}
+
+/// Whether two flowpipes have the same pieces, compared by their interval
+/// hulls: factor ids are fresh on every run, so the sets never compare equal.
+fn same_flowpipe(a: &[Vec<Step>], b: &[Vec<Step>]) -> bool {
+    a.len() == b.len()
+        && a.iter().zip(b).all(|(x, y)| {
+            x.len() == y.len()
+                && x.iter().zip(y).all(|(p, q)| {
+                    p.time_point.interval_hull() == q.time_point.interval_hull()
+                        && p.time_interval.interval_hull() == q.time_interval.interval_hull()
+                })
+        })
 }
