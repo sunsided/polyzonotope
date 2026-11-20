@@ -85,9 +85,11 @@ impl LinearReach {
     /// Panics if `x` does not have one row per state or `u` one per input.
     #[must_use]
     pub fn step(&self, x: &SparsePolyZonotope, u: &Zonotope) -> Step {
-        let constant = &self.system.b * u.center();
-        let varying = Zonotope::new(DVector::zeros(u.dim()), u.generators().clone())
-            .linear_map(&self.system.b);
+        // `B U` with its rounding errors as generators: a constant is one of
+        // the signals the varying part covers, so they may go there.
+        let input = u.linear_map(&self.system.b);
+        let constant = input.center().clone();
+        let varying = Zonotope::new(DVector::zeros(input.dim()), input.generators().clone());
         let particular = self.varying_input_response(&varying);
 
         let input_effect = point_response(&self.input_solution, &constant);
