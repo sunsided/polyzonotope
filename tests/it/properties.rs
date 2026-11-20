@@ -334,6 +334,20 @@ proptest! {
     }
 }
 
+proptest! {
+    /// The split hull contains every sampled point and lies inside the plain hull.
+    #[test]
+    fn split_hull_is_sound_and_tighter(pz in arb_pz(), splits in 0usize..20, samples in arb_samples()) {
+        let (tight, coarse) = (pz.interval_hull_split(1e-3, splits), pz.interval_hull());
+        for s in &samples {
+            prop_assert!(tight.contains(&eval(&pz, s), TOL));
+        }
+        for (t, c) in tight.0.iter().zip(&coarse.0) {
+            prop_assert!(c.lo <= t.lo && t.hi <= c.hi);
+        }
+    }
+}
+
 /// The support function `max { dᵀ x | x ∈ Z } = dᵀ c + Σ |dᵀ gⱼ|`.
 fn support(z: &Zonotope, d: &DVector<f64>) -> f64 {
     d.dot(z.center())

@@ -7,6 +7,8 @@ use portable_atomic::{AtomicU64, Ordering};
 
 use nalgebra::{DMatrix, DVector};
 
+mod hull;
+
 use crate::reduce::{self, Reduction};
 use crate::round::{self, RowErrors};
 use crate::{Interval, IntervalBox, Zonotope, from_column_list, hcat};
@@ -781,6 +783,15 @@ fn pow_by_squaring(mut x: f64, mut n: u32) -> f64 {
     }
 
     acc
+}
+
+impl SparsePolyZonotope {
+    /// Whether [`split`](Self::split) accepts the factor in row `k`: none of
+    /// its exponents is above [`MAX_SPLIT_EXPONENT`]. Branch and bound skips
+    /// the others instead of panicking.
+    pub(crate) fn can_split(&self, k: usize) -> bool {
+        self.e.row(k).iter().all(|&d| d <= MAX_SPLIT_EXPONENT)
+    }
 }
 
 /// Largest exponent [`SparsePolyZonotope::split`] accepts: every `C(d, j)` with
