@@ -7,9 +7,11 @@ extern crate alloc;
 /// The set types this crate propagates, re-exported so callers need one dependency.
 pub use polyzonotope;
 
+mod dynamics;
 mod linear;
 mod taylor;
 
+pub use dynamics::{Dynamics, Polynomial};
 pub use linear::{LinearReach, LinearSystem, Step};
 
 /// Why a reachability computation could not produce a sound result.
