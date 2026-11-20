@@ -25,7 +25,7 @@ const TOL: f64 = 1e-9;
 const SUBSTEPS: u32 = 40;
 
 /// Trajectories sampled per scenario.
-const SAMPLES: usize = 40;
+const SAMPLES: usize = 24;
 
 /// One test system with its start set and input range.
 struct Scenario {

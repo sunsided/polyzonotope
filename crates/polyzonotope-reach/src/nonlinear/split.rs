@@ -10,6 +10,7 @@
 
 use alloc::vec::Vec;
 
+use super::Splitting;
 use nalgebra::{DMatrix, DVector};
 use polyzonotope::{FactorId, Interval, IntervalBox, Reduction, SparsePolyZonotope, Zonotope};
 
@@ -40,16 +41,22 @@ use polyzonotope::{FactorId, Interval, IntervalBox, Reduction, SparsePolyZonotop
 ///
 /// On the cubic drift `x₀' = x₀³` from a box of radius 0.5, factor splits
 /// alone needed 30 pieces where box splits needed fewer than 8, so the
-/// cheaper of the two wins, split by split.
+/// cheaper of the two wins, split by split, unless `splitting` is
+/// [`Splitting::Factors`].
 pub(super) fn halves(
     piece: &SparsePolyZonotope,
     cost: impl Fn(&SparsePolyZonotope) -> f64,
+    splitting: Splitting,
 ) -> Option<(SparsePolyZonotope, SparsePolyZonotope)> {
     let lifted = lift_independent(&box_independent(piece));
-    let oriented =
-        SparsePolyZonotope::from_zonotope(&piece.reduce(1.0, Reduction::Pca).to_zonotope());
-    let candidates = [&lifted, &oriented]
-        .into_iter()
+    let oriented = match splitting {
+        Splitting::Factors => None,
+        _ => Some(SparsePolyZonotope::from_zonotope(
+            &piece.reduce(1.0, Reduction::Pca).to_zonotope(),
+        )),
+    };
+    let candidates = core::iter::once(&lifted)
+        .chain(oriented.as_ref())
         .flat_map(|set| set.ids().iter().map(move |&id| (set, id)))
         .filter(|&(set, id)| splittable(set, id));
     let best = candidates
@@ -311,7 +318,7 @@ mod tests {
     #[test]
     fn split_takes_the_widest_factor() {
         let pz = mixed();
-        let (lower, upper) = halves(&pz, width).expect("splittable");
+        let (lower, upper) = halves(&pz, width, Splitting::Cheapest).expect("splittable");
         assert!(width(&lower) < width(&pz) && width(&upper) < width(&pz));
         let hull = lower.interval_hull();
         assert!((hull.0[1].width() - 4.0).abs() < 1e-12, "{hull:?}");
@@ -324,7 +331,7 @@ mod tests {
             DVector::from_element(2, 1.0),
             DMatrix::zeros(2, 0),
         ));
-        assert!(halves(&point, width).is_none());
+        assert!(halves(&point, width, Splitting::Cheapest).is_none());
     }
 
     /// Two halves of a split merge back into a set no wider than their
@@ -332,7 +339,7 @@ mod tests {
     #[test]
     fn halves_merge_back() {
         let pz = mixed();
-        let (lower, upper) = halves(&pz, width).unwrap();
+        let (lower, upper) = halves(&pz, width, Splitting::Factors).unwrap();
         let merged = merge(
             alloc::vec![lower.clone(), upper.clone()],
             0.05,
@@ -346,7 +353,7 @@ mod tests {
     /// The cap stops a merge into a set wider than the caller can step.
     #[test]
     fn cap_blocks_the_merge() {
-        let (lower, upper) = halves(&mixed(), width).unwrap();
+        let (lower, upper) = halves(&mixed(), width, Splitting::Factors).unwrap();
         let cap = width(&lower).max(width(&upper));
         assert_eq!(
             merge(alloc::vec![lower, upper], 0.05, cap, Clone::clone).len(),
@@ -418,7 +425,7 @@ mod properties {
         #[test]
         fn halves_cover_the_set(pz in arb_set(), a in -1.0..1.0f64, b in -1.0..1.0f64, beta in -1.0..1.0f64) {
             let p = pz.evaluate(&[a, b], &[beta]);
-            if let Some((lower, upper)) = halves(&pz, width) {
+            if let Some((lower, upper)) = halves(&pz, width, Splitting::Cheapest) {
                 prop_assert!(near(&lower, &p) || near(&upper, &p));
             }
         }

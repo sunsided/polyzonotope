@@ -14,7 +14,7 @@ mod taylor;
 
 pub use dynamics::{Dynamics, IntervalTensor, Polynomial};
 pub use linear::{LinearReach, LinearSystem, Step};
-pub use nonlinear::{Method, NonlinearReach, NonlinearSettings};
+pub use nonlinear::{Method, NonlinearReach, NonlinearSettings, Splitting};
 
 /// Why a reachability computation could not produce a sound result.
 ///
@@ -31,8 +31,8 @@ pub enum ReachError {
     StepTooLarge,
     /// The abstraction error of a nonlinear step was not confirmed: it kept
     /// outgrowing the assumed bound, or stopped being finite. The set or
-    /// the step is too large for the linearization; split the set or use a
-    /// smaller step.
+    /// the step is too large for the abstraction (linearization or
+    /// polynomialization); split the set or use a smaller step.
     AbstractionDiverged,
     /// [`Method::Polynomialization`] needs third derivatives for its
     /// Lagrange remainder, and [`Dynamics::third_derivatives`] supplies none.
@@ -45,7 +45,7 @@ impl core::fmt::Display for ReachError {
         f.write_str(match self {
             Self::InvalidStep => "time step must be finite and non-negative",
             Self::StepTooLarge => "time step too large for the Taylor remainder bound",
-            Self::AbstractionDiverged => "abstraction error of the linearization did not converge",
+            Self::AbstractionDiverged => "abstraction error of the step did not converge",
             Self::MissingDerivatives => "polynomialization needs third derivatives of the dynamics",
         })
     }

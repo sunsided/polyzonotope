@@ -3,85 +3,9 @@
 //! zonotope over the factors of the set, and only what changes during the
 //! step goes through interval arithmetic.
 //!
-//! # The error decomposition
-//!
-//! Let `f` be three times continuously differentiable, `z* = (x*, u*)` the
-//! linearization point and `[A B]` the center of the enclosure of `J(z*)`,
-//! with `w ∈ f(z*) − A x* − B u*` the model offset. For a trajectory with
-//! `x(t_k) = x_k` and any input signal `u(t) ∈ U`, write
-//!
-//! - `Δz(t) = z(t) − z*` with `z(t) = (x(t), u(t))`,
-//! - `s = (x_k − x_m, 0)`, the start of the trajectory relative to the
-//!   middle `x_m` of the start set's hull, which is constant along the
-//!   trajectory, and
-//! - `δ(t) = Δz(t) − s = (x(t) − x_k − c, u(t) − u*)`, what changes, with
-//!   `c = x* − x_m` the half step from `x_m` to the linearization point.
-//!
-//! Any constant split of `Δz` would do; this one centers both parts. With
-//! `s = (x_k − x*, 0)` instead, `s` would be off-center by the half step and
-//! `δ` would range over the whole step's drift `[0, r] f`, which made the
-//! sets of small starts larger than those of linearization in a trial on
-//! Van der Pol. Centered, `δ` spans about `±½ r f`.
-//!
-//! Taylor's theorem with the Lagrange remainder gives, row by row and for
-//! some `ξ(t)` on the segment from `z*` to `z(t)`,
-//!
-//! ```text
-//! f(z) = f(z*) + J(z*) Δz + ½ Δzᵀ H(z*) Δz + ⅙ Σ_{abc} ∂³f(ξ)_{abc} Δz_a Δz_b Δz_c.
-//! ```
-//!
-//! With `½ H(z*) ∈ Q ± R_Q` and `J(z*) ∈ [A B] ± R_J`, the error of the
-//! linear model, `e = f(z) − (A x + B u + w)`, splits into
-//!
-//! ```text
-//! e = ψ_s(x_k) + ψ_d(t),
-//! ψ_s(x_k) = sᵀ Q s                                          (static)
-//! ψ_d(t)  ∈ sᵀ [±R_Q] s + sᵀ (½H) δ + δᵀ (½H) s + δᵀ (½H) δ  (dynamic)
-//!           + ⅙ Σ T(ξ) Δz Δz Δz + [±R_J] |Δz|.
-//! ```
-//!
-//! The inputs are never part of `s`: `u(t)` may jump anywhere in `U` during
-//! the step, so only the state at `t_k` is constant along a trajectory.
-//! Every term with `u − u*` is dynamic.
-//!
-//! # Why the sets enclose every trajectory
-//!
-//! The static part is a polynomial of `x_k` alone. [`static_error`] computes
-//! `Ψ_s = { sᵀ Q s | x_k ∈ X }` with the quadratic map of the polynomial
-//! zonotope `X − x_m`, which keeps the factors of `X`: the point of `Ψ_s` that
-//! belongs to `x_k = X(α, β)` uses the same `α`. Degrees above the cap are
-//! enclosed as independent generators, which only adds points.
-//!
-//! The static error acts on the trajectory as a constant input `v = ψ_s(x_k)`.
-//! The step therefore runs the linear reach on the augmented system
-//! `x' = A x + v + B u + w + ψ_d`, `v' = 0`, from
-//! `X × Ψ_s` built with [`SparsePolyZonotope::cartesian_product`], which
-//! keeps the shared factors: `(x_k, ψ_s(x_k))` is a point of it. The linear
-//! reach is sound for any input signal in its input set, so with
-//! `ψ_d(t) ∈ Ψ̄` for all `t` of the step, the projection of its sets onto
-//! `x` holds the trajectory at `t_{k+1}` and during the step. The static
-//! error never needs a guess: it is exact up to the degree cap, and it moves
-//! with the set rather than being smeared over the whole step as a box.
-//!
-//! The dynamic part needs boxes of `s`, `δ` and `Δz`. [`dynamic_error`]
-//! takes `s` from the interval hull of `X − x_m`, `Δz` from the hull of the
-//! time-interval set `R(τ)` and `U`, the input part of `δ` from `U − u*`, and
-//! the state part from the flow:
-//! `x(t) − x_k = ∫_{t_k}^t f(z(σ)) dσ ∈ [0, r] · f(□R(τ) × □U)`, minus `c`
-//! (enclosed in interval arithmetic), as long as the trajectory stays in
-//! `R(τ)` up to `t`. That is the same hypothesis the
-//! guess-and-check loop proves for every other term, so the usual argument
-//! closes: if the dynamic error computed over `R(τ)` lies in the guess `Ψ̄`,
-//! no trajectory can leave `R(τ)` during the step, because up to the first
-//! exit its error lies in `Ψ̄` and the linear model with an input in `Ψ̄`
-//! keeps it in `R(τ)`. The remainder evaluates `∂³f` over a box that holds
-//! every segment from `z*` into `z* + □Δz`, which holds every `ξ(t)`.
-//!
-//! The decomposition is exact algebra, every box encloses its quantity, and
-//! every product and sum of boxes is interval arithmetic, outward rounded
-//! with the `sound` feature. Removing any one term makes the claim false;
-//! the unit tests show that for each term that floating-point rounding does
-//! not dominate.
+//! The error decomposition and the soundness argument are documented on
+//! [`Method::Polynomialization`](crate::Method::Polynomialization), where
+//! they show in the public docs.
 
 use alloc::vec::Vec;
 

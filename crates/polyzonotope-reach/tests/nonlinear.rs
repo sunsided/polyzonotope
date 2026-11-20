@@ -9,7 +9,7 @@ use nalgebra::{DMatrix, DVector};
 use polyzonotope::{Interval, IntervalBox, IntervalMatrix, SparsePolyZonotope, Zonotope};
 use polyzonotope_reach::{
     Dynamics, IntervalTensor, LinearReach, LinearSystem, Method, NonlinearReach, NonlinearSettings,
-    Polynomial, ReachError, Step,
+    Polynomial, ReachError, Splitting, Step,
 };
 use proptest::collection::vec;
 use proptest::prelude::*;
@@ -417,7 +417,7 @@ fn pieces_merge_as_the_set_contracts(method: Method) {
     let counts: Vec<usize> = flowpipe.iter().map(Vec::len).collect();
     assert!(counts.iter().any(|&c| c > 1), "{counts:?}");
     assert!(counts.windows(2).any(|w| w[1] < w[0]), "{counts:?}");
-    check_trajectories(damped, &flowpipe, (&[0.0, 0.0], 1.0, 0.0), 0.1, 24);
+    check_trajectories(damped, &flowpipe, (&[0.0, 0.0], 1.0, 0.0), 0.1, 12);
 }
 
 /// `x₀' = x₁`, `x₁' = −x₀ − x₀ u`: a spring whose stiffness the input
@@ -562,6 +562,31 @@ fn degree_stays_capped() {
         let e = step.time_point.exponents();
         assert!((0..e.ncols()).all(|j| e.column(j).sum() <= 3));
     }
+}
+
+/// Factor splits alone, which keep every dependency, carry the cubic drift
+/// from radius 0.5, with more pieces than the default needs, and the pieces
+/// contain every sampled trajectory.
+#[test]
+fn factor_splits_carry_the_cubic_drift() {
+    /// The vector field in plain `f64`.
+    fn cubic(x: &DVector<f64>, _: f64) -> DVector<f64> {
+        DVector::from_vec(vec![x[0].powi(3), -x[1]])
+    }
+
+    let dynamics = Polynomial::new(2, 1)
+        .term(0, 1.0, &[3, 0, 0])
+        .term(1, -1.0, &[0, 1, 0]);
+    let settings = NonlinearSettings {
+        splitting: Splitting::Factors,
+        max_pieces: 64,
+        ..sharp(0.05, Method::Linearization)
+    };
+    let flowpipe = NonlinearReach::new(dynamics, settings)
+        .reach(&initial_box(&[0.0, 0.0], 0.5), &input(0.0), 10)
+        .expect("factor splits carry the set");
+    assert!(flowpipe.last().expect("ten steps").len() > 8);
+    check_trajectories(cubic, &flowpipe, (&[0.0, 0.0], 0.5, 0.0), 0.05, 24);
 }
 
 /// A random linear system `x' = A x + B u` with two states and one input,

@@ -55,7 +55,104 @@ pub enum Method {
     /// third-order Lagrange remainder go into the box. Needs
     /// [`Dynamics::third_derivatives`]. Tighter for large sets, since the box
     /// shrinks from `O(w²)` to `O(w r + w³)` for a set of width `w`.
+    ///
+    /// # The error decomposition
+    ///
+    /// Let `f` be three times continuously differentiable, `z* = (x*, u*)` the
+    /// linearization point and `[A B]` the center of the enclosure of `J(z*)`,
+    /// with `w ∈ f(z*) − A x* − B u*` the model offset. For a trajectory with
+    /// `x(t_k) = x_k` and any input signal `u(t) ∈ U`, write
+    ///
+    /// - `Δz(t) = z(t) − z*` with `z(t) = (x(t), u(t))`,
+    /// - `s = (x_k − x_m, 0)`, the start of the trajectory relative to the
+    ///   middle `x_m` of the start set's hull, which is constant along the
+    ///   trajectory, and
+    /// - `δ(t) = Δz(t) − s = (x(t) − x_k − c, u(t) − u*)`, what changes, with
+    ///   `c = x* − x_m` the half step from `x_m` to the linearization point.
+    ///
+    /// Any constant split of `Δz` would do; this one centers both parts. With
+    /// `s = (x_k − x*, 0)` instead, `s` would be off-center by the half step and
+    /// `δ` would range over the whole step's drift `[0, r] f`, which made the
+    /// sets of small starts larger than those of linearization in a trial on
+    /// Van der Pol. Centered, `δ` spans about `±½ r f`.
+    ///
+    /// Taylor's theorem with the Lagrange remainder gives, row by row and for
+    /// some `ξ(t)` on the segment from `z*` to `z(t)`,
+    ///
+    /// ```text
+    /// f(z) = f(z*) + J(z*) Δz + ½ Δzᵀ H(z*) Δz + ⅙ Σ_{abc} ∂³f(ξ)_{abc} Δz_a Δz_b Δz_c.
+    /// ```
+    ///
+    /// With `½ H(z*) ∈ Q ± R_Q` and `J(z*) ∈ [A B] ± R_J`, the error of the
+    /// linear model, `e = f(z) − (A x + B u + w)`, splits into
+    ///
+    /// ```text
+    /// e = ψ_s(x_k) + ψ_d(t),
+    /// ψ_s(x_k) = sᵀ Q s                                          (static)
+    /// ψ_d(t)  ∈ sᵀ [±R_Q] s + sᵀ (½H) δ + δᵀ (½H) s + δᵀ (½H) δ  (dynamic)
+    ///           + ⅙ Σ T(ξ) Δz Δz Δz + [±R_J] |Δz|.
+    /// ```
+    ///
+    /// The inputs are never part of `s`: `u(t)` may jump anywhere in `U` during
+    /// the step, so only the state at `t_k` is constant along a trajectory.
+    /// Every term with `u − u*` is dynamic.
+    ///
+    /// # Why the sets enclose every trajectory
+    ///
+    /// The static part is a polynomial of `x_k` alone. The step computes
+    /// `Ψ_s = { sᵀ Q s | x_k ∈ X }` with the quadratic map of the polynomial
+    /// zonotope `X − x_m`, which keeps the factors of `X`: the point of `Ψ_s` that
+    /// belongs to `x_k = X(α, β)` uses the same `α`. Degrees above the cap are
+    /// enclosed as independent generators, which only adds points.
+    ///
+    /// The static error acts on the trajectory as a constant input `v = ψ_s(x_k)`.
+    /// The step therefore runs the linear reach on the augmented system
+    /// `x' = A x + v + B u + w + ψ_d`, `v' = 0`, from
+    /// `X × Ψ_s` built with [`SparsePolyZonotope::cartesian_product`](polyzonotope::SparsePolyZonotope::cartesian_product), which
+    /// keeps the shared factors: `(x_k, ψ_s(x_k))` is a point of it. The linear
+    /// reach is sound for any input signal in its input set, so with
+    /// `ψ_d(t) ∈ Ψ̄` for all `t` of the step, the projection of its sets onto
+    /// `x` holds the trajectory at `t_{k+1}` and during the step. The static
+    /// error never needs a guess: it is exact up to the degree cap, and it moves
+    /// with the set rather than being smeared over the whole step as a box.
+    ///
+    /// The dynamic part needs boxes of `s`, `δ` and `Δz`. The step
+    /// takes `s` from the interval hull of `X − x_m`, `Δz` from the hull of the
+    /// time-interval set `R(τ)` and `U`, the input part of `δ` from `U − u*`, and
+    /// the state part from the flow:
+    /// `x(t) − x_k = ∫_{t_k}^t f(z(σ)) dσ ∈ [0, r] · f(□R(τ) × □U)`, minus `c`
+    /// (enclosed in interval arithmetic), as long as the trajectory stays in
+    /// `R(τ)` up to `t`. That is the same hypothesis the
+    /// guess-and-check loop proves for every other term, so the usual argument
+    /// closes: if the dynamic error computed over `R(τ)` lies in the guess `Ψ̄`,
+    /// no trajectory can leave `R(τ)` during the step, because up to the first
+    /// exit its error lies in `Ψ̄` and the linear model with an input in `Ψ̄`
+    /// keeps it in `R(τ)`. The remainder evaluates `∂³f` over a box that holds
+    /// every segment from `z*` into `z* + □Δz`, which holds every `ξ(t)`.
+    ///
+    /// The decomposition is exact algebra, every box encloses its quantity, and
+    /// every product and sum of boxes is interval arithmetic, outward rounded
+    /// with the `sound` feature. Removing any one term makes the claim false;
+    /// the unit tests show that for each term that floating-point rounding does
+    /// not dominate.
     Polynomialization,
+}
+
+/// How [`NonlinearReach::reach`] splits a piece whose step diverged.
+///
+/// Non-exhaustive: more strategies may be added.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum Splitting {
+    /// Factor splits and box splits compete, and the one whose larger half
+    /// has the smaller second-order error bound wins, split by split. The
+    /// default: on the cubic drift `x₀' = x₀³` from radius 0.5, factor
+    /// splits alone needed 30 pieces where this needs 4.
+    #[default]
+    Cheapest,
+    /// Factor splits only: every piece keeps all dependencies of the start
+    /// set, at the price of more pieces.
+    Factors,
 }
 
 /// How [`NonlinearReach`] steps through time.
@@ -76,6 +173,8 @@ pub struct NonlinearSettings {
     /// Most pieces a set may be split into per time step before a failing
     /// step is refused; 1 never splits.
     pub max_pieces: usize,
+    /// Which splits [`reach`](NonlinearReach::reach) may use.
+    pub splitting: Splitting,
     /// The abstraction of each step.
     pub method: Method,
     /// How much larger than the two pieces' interval hulls together the
@@ -95,7 +194,8 @@ pub struct NonlinearSettings {
 
 impl NonlinearSettings {
     /// Defaults for time step `step`: 4 Taylor terms, order 20, 10
-    /// iterations, 10% widening, up to 8 pieces merged within 10%,
+    /// iterations, 10% widening, up to 8 pieces from the cheapest splits,
+    /// merged within 10%,
     /// linearization, and degree 4 for polynomialization.
     #[must_use]
     pub fn new(step: f64) -> Self {
@@ -106,6 +206,7 @@ impl NonlinearSettings {
             max_iterations: 10,
             enlarge: 0.1,
             max_pieces: 8,
+            splitting: Splitting::Cheapest,
             method: Method::Linearization,
             merge_tolerance: 0.1,
             max_degree: 4,
@@ -269,8 +370,8 @@ impl<D: Dynamics> NonlinearReach<D> {
 
     /// One step of [`Method::Polynomialization`]: the static error `Ψ_s`
     /// rides along as the constant input of an augmented linear system, and
-    /// only the dynamic error is a guessed box. The soundness argument is in
-    /// the `polynomialization` module.
+    /// only the dynamic error is a guessed box. The soundness argument is on
+    /// [`Method::Polynomialization`].
     fn step_polynomialized(
         &self,
         x: &SparsePolyZonotope,
@@ -358,8 +459,9 @@ impl<D: Dynamics> NonlinearReach<D> {
     ///
     /// A piece whose step diverges is split in two and retried, as long as
     /// the step stays within `max_pieces`. The split cuts one factor of the
-    /// piece, keeping its dependencies, or one axis of its oriented box,
-    /// whichever leaves halves with the smaller second-order error bound.
+    /// piece, keeping its dependencies, or (unless
+    /// [`Splitting::Factors`]) one axis of its oriented box, whichever
+    /// leaves halves with the smaller second-order error bound.
     /// After each step, pieces whose merged enclosure is within
     /// `merge_tolerance` of their hulls, and no wider than half the
     /// narrowest piece that diverged so far, become one piece again.
@@ -465,8 +567,9 @@ impl<D: Dynamics> NonlinearReach<D> {
                     if done.len() + todo.len() + 2 <= self.settings.max_pieces =>
                 {
                     narrowest = narrowest.min(split::width(&piece));
-                    let (lower, upper) = split::halves(&piece, |p| self.curvature(p, u))
-                        .ok_or(ReachError::AbstractionDiverged)?;
+                    let (lower, upper) =
+                        split::halves(&piece, |p| self.curvature(p, u), self.settings.splitting)
+                            .ok_or(ReachError::AbstractionDiverged)?;
                     todo.push(lower);
                     todo.push(upper);
                 }
