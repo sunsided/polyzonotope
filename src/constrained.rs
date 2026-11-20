@@ -222,8 +222,12 @@ impl ConstrainedPolyZonotope {
         }
 
         // aᵀx + s − d = 0 with s = half + half · α_s over [0, 2 half] ⊇ [0, d − min aᵀx].
-        // shortcut: halving is exact unless `u` is subnormal; irrelevant at any practical scale.
-        let half = 0.5 * round::add_up(h.offset, -range.lo);
+        let width = round::add_up(h.offset, -range.lo);
+        let mut half = 0.5 * width;
+        if 2.0 * half < width {
+            // Halving rounded down (`width / 2` is subnormal); doubling is exact.
+            half = half.next_up();
+        }
         let slack = SparsePolyZonotope::new(
             last(-h.offset),
             DMatrix::from_fn(rows + 1, 2, |i, _| if i == rows { half } else { 0.0 }),
@@ -325,10 +329,28 @@ impl ConstrainedPolyZonotope {
     }
 
     /// Whether the hull of every constraint row of `piece` contains zero.
+    ///
+    /// Plain mode allows a rounding residue relative to the magnitude of the
+    /// whole piece: a constraint like `x − x = 0` built along two paths can
+    /// leave a few ulps after its terms cancel, and dropping that piece would
+    /// call a non-empty set empty. Under `sound` the residue is already an
+    /// error generator.
     fn might_be_feasible(&self, piece: &SparsePolyZonotope) -> bool {
-        piece.interval_hull().0[self.dim..]
+        let hull = piece.interval_hull();
+        let slack = if cfg!(feature = "sound") {
+            0.0
+        } else {
+            let magnitude = piece
+                .center()
+                .iter()
+                .chain(piece.dependent_generators().iter())
+                .chain(piece.independent_generators().iter());
+            1e3 * f64::EPSILON * round::abs_sum_up(magnitude)
+        };
+
+        hull.0[self.dim..]
             .iter()
-            .all(|iv| iv.lo <= 0.0 && 0.0 <= iv.hi)
+            .all(|iv| iv.lo <= slack && -slack <= iv.hi)
     }
 
     /// Same set, with all dependent factors renamed to fresh ids.

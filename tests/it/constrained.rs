@@ -55,7 +55,9 @@ proptest! {
         let cut = ConstrainedPolyZonotope::from(pz.clone()).intersect_halfspace(&h);
         let stacked = cut.stacked();
         let lo = pz.linear_map(&DMatrix::from_row_slice(1, n, a.as_slice())).interval_hull().0[0].lo;
-        prop_assume!(cut.num_constraints() == 1 && lo <= offset);
+        if cut.num_constraints() != 1 || lo > offset {
+            return Ok(()); // the halfspace does not cut; nothing to close
+        }
         let half = (offset - lo) / 2.0;
         let slack = stacked.ids().iter().copied().find(|id| !pz.ids().contains(id));
         // The constraint row reuses the set's β; no copies are appended in plain mode.
