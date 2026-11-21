@@ -413,11 +413,22 @@ impl<D: Dynamics> NonlinearReach<D> {
 }
 
 /// The length of the next time step of `run`, or `None` once `horizon` is
-/// reached: the run's step, cut to the time left for a duration.
+/// reached: the run's step, cut to the time left for a duration. A step
+/// that leaves only a rounding residue is stretched to the end instead, so
+/// that ten steps of 0.1, which add up to 0.9999999999999999, do not need
+/// an eleventh step of 1e-16.
 fn next_length(horizon: Horizon, run: &Run) -> Option<f64> {
     match horizon {
         Horizon::Steps(n) => (run.flowpipe.len() < n).then_some(run.step),
-        Horizon::Time(t) => (run.elapsed < t).then(|| run.step.min(t - run.elapsed)),
+        Horizon::Time(t) => {
+            let left = t - run.elapsed;
+            let length = if left <= run.step * (1.0 + 1e-9) {
+                left
+            } else {
+                run.step
+            };
+            (left > 0.0).then_some(length)
+        }
     }
 }
 
