@@ -141,6 +141,8 @@ With the `sound` feature, the rounding of the floating-point computation is cove
 
 The linear tests compare against reference trajectories: matrix exponentials of the augmented system, and inputs that jump inside `U`. They check the state at the end of each step and at sampled times inside it, against both the interval hull and the support function in random directions. Without inputs, the time-point set must equal `e^{Ar} X` at matching factor values. Removing the Taylor remainder, `F`, `F̃` or `R_p` makes at least one test fail.
 
+A cross-check against [CORA](https://github.com/TUMcps/CORA): `tests/cora/generate.m` steps four linear systems with CORA's `linearSys/oneStep`, ten steps each from the time-point set of the last, and writes the interval hulls to `tests/cora/reference.txt`, which `tests/cora.rs` compares against. The time-point hulls agree within 1e-5 of their width and the time-interval hulls within 1%, since the two bound the curvature corrections differently. Regenerate from the repository root with `CORA_PATH=/path/to/CORA octave --no-gui --quiet crates/polyzonotope-reach/tests/cora/generate.m`. Under Octave this needs the shims in `tests/cora/octave` of both crates. CORA itself is GPL-3.0 and is not part of this repository.
+
 The nonlinear tests run every scenario with both methods: Van der Pol with an input, a pendulum with a torque input, a cubic drift that the linearization cannot see, Van der Pol from a single point, a spring whose stiffness is the input (`∂²f/∂x∂u ≠ 0`), and a damped cubic whose pieces split and later merge. Trajectories are integrated with a fine RK4 in `f64`. Every third holds the input at its upper end, every third at its lower end, and the rest jump every sub-step. They must stay inside the time-point set at every step end and inside the time-interval set at every sub-step. For linear dynamics, a step must give the same sets as `LinearReach`. Further tests check that an oversized set is refused, that a degree-9 field that overflows `f64` is refused instead of panicking, that missing third derivatives are refused at once, that the degree stays capped over 60 steps, that splitting carries a set that one piece cannot, that a failed run keeps its proven steps, that lifting keeps a wide set narrow, and that adaptive steps shrink where a fixed step fails and grow after easy steps. The Monte Carlo checks integrate each step over its own duration.
 
 In-crate mutation tests drop one error term at a time, each in a scenario built for it, and show a trajectory escaping: the quadratic error and the Hessian spread for linearization, and the static set, its cubic form, the cross term, `δᵀ H δ`, the change of the cubic term, the remainder and the input part of `δ` for polynomialization. The spreads of `J(z*)` and `H(z*)` come from rounding only, and no sampling can show them.
@@ -148,7 +150,7 @@ In-crate mutation tests drop one error term at a time, each in a scenario built 
 ## Roadmap
 
 1. A tighter dynamic error for wide sets. From `ρ = 1`, Van der Pol fails because the error box feeds on itself.
-2. A cross-check of the reachable sets against CORA, for linear and nonlinear systems.
+2. A cross-check of the nonlinear reachable sets against CORA. Its generator needs MATLAB, because CORA's symbolic derivatives do not run under Octave.
 
 ## License
 
