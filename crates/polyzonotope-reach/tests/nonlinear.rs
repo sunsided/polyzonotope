@@ -463,9 +463,14 @@ both_methods!(merging, pieces_merge_as_the_set_contracts);
 
 /// `x₀' = −x₀ − x₀³`, `x₁' = −x₁ + ½ x₀²` from a wide box: the cubic forces
 /// splits early on, and the contraction toward the origin later lets the
-/// pieces merge again. The merged sets still hold every trajectory.
+/// pieces merge again. The merged sets still hold every trajectory. With
+/// lifting: without it, polynomialization's 6 pieces stay apart to the end.
 fn pieces_merge_as_the_set_contracts(method: Method) {
-    let flowpipe = NonlinearReach::new(damped(), sharp(0.1, method))
+    let settings = NonlinearSettings {
+        restructure: Restructure::Lift,
+        ..sharp(0.1, method)
+    };
+    let flowpipe = NonlinearReach::new(damped(), settings)
         .reach(&initial_box(&[0.0, 0.0], 1.0), &input(0.0), 40)
         .expect("splitting carries the set");
     let counts: Vec<usize> = flowpipe.iter().map(Vec::len).collect();

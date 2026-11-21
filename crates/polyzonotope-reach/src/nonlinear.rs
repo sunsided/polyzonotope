@@ -182,15 +182,19 @@ pub enum Splitting {
 #[non_exhaustive]
 pub enum Restructure {
     /// They stay independent generators. Their products in the next step's
-    /// quadratic error are enclosed one by one, so a wide set loses its
-    /// shape step by step.
+    /// quadratic error are enclosed one by one, so a wide set loses some of
+    /// its shape step by step. The default: the time-interval hull pairs
+    /// each independent generator with its image, which keeps most of that
+    /// shape, and [`Lift`](Self::Lift) costs more for little gain.
+    #[default]
     Off,
     /// After each step's Girard reduction, every independent generator of
     /// the time-point set becomes a dependent factor of its own. That is
     /// exact (`g β` with `β ∈ [-1, 1]` is the monomial `g α` of a factor
     /// nowhere else), and from then on the quadratic maps of later steps
     /// treat it as a polynomial: `α²` stays non-negative and products
-    /// cancel. The default, at 1.5 to 1.7 times the cost. The number
+    /// cancel. Where nothing merges, it costs 1.5 to 1.7 times as much as
+    /// [`Off`](Self::Off) (40 steps of Van der Pol from radius 0.5). The number
     /// of factors stays at most the number of generators, since
     /// [`compact`](polyzonotope::SparsePolyZonotope::compact) drops the
     /// unused ones.
@@ -199,8 +203,8 @@ pub enum Restructure {
     /// ends 40 steps 6% narrower than with [`Off`](Self::Off), and from
     /// radius 1 both prove the same 22 steps. On the damped cubic
     /// `x₀' = −x₀ − x₀³` from radius 1, both need 6 pieces, and the lifted
-    /// sets end 15% wider.
-    #[default]
+    /// sets end 15% wider; but lifted pieces merge back to 3, where
+    /// unlifted ones stay apart, so that run takes 4.0 s instead of 4.8 s.
     Lift,
 }
 
@@ -252,7 +256,7 @@ pub struct NonlinearSettings {
 impl NonlinearSettings {
     /// Defaults for time step `step`: 4 Taylor terms, order 20, 10
     /// iterations, 10% widening, up to 8 pieces from the cheapest splits,
-    /// merged within 10%, lifted generators, fixed steps,
+    /// merged within 10%, independent generators kept, fixed steps,
     /// linearization, and degree 4 for polynomialization.
     #[must_use]
     pub fn new(step: f64) -> Self {
@@ -267,7 +271,7 @@ impl NonlinearSettings {
             method: Method::Linearization,
             merge_tolerance: 0.1,
             max_degree: 4,
-            restructure: Restructure::Lift,
+            restructure: Restructure::Off,
             adaptive: None,
         }
     }
