@@ -80,7 +80,8 @@ fn point(pz: &SparsePolyZonotope, draws: &[f64]) -> DVector<f64> {
 }
 
 /// Whether `x` lies in the set, as seen by its interval hull and by the
-/// support function of its zonotope enclosure in the given directions.
+/// support function of its zonotope enclosure in the given directions,
+/// both ways along each.
 fn inside(set: &SparsePolyZonotope, x: &DVector<f64>, directions: &[DVector<f64>]) -> bool {
     let slack = TOL * (1.0 + x.amax());
     let z = set.to_zonotope();
@@ -93,9 +94,15 @@ fn inside(set: &SparsePolyZonotope, x: &DVector<f64>, directions: &[DVector<f64>
     };
 
     set.interval_hull().contains(x, slack)
-        && directions
-            .iter()
-            .all(|d| d.dot(x) <= support(d) + slack * (1.0 + d.amax()))
+        && directions.iter().all(|d| {
+            let margin = slack * (1.0 + d.amax());
+            d.dot(x) <= support(d) + margin && -d.dot(x) <= support(&-d) + margin
+        })
+}
+
+/// `‖A‖∞ = max_i Σ_j |A_ij|`.
+fn infinity_norm(a: &DMatrix<f64>) -> f64 {
+    a.row_iter().map(|row| row.abs().sum()).fold(0.0, f64::max)
 }
 
 /// The step, or `None` if the remainder bound rejects this step size.
@@ -146,6 +153,9 @@ proptest! {
         directions in vec(vec(-1.0..1.0f64, 3), 4),
     ) {
         let (n, m) = (sys.a.nrows(), sys.b.ncols());
+        // Keep ‖A‖∞ r <= 0.6: with η = 2 a larger product inflates E(r) to
+        // tens of units and every state passes regardless of F, F̃ and R_p.
+        let r = r.min(0.6 / infinity_norm(&sys.a));
         let x0 = initial_set(n, &values, spread);
         let u = input_set(m, &values);
         // A constant input without spread exposes the input correction F̃ the same way.
