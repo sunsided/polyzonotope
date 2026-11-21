@@ -36,6 +36,7 @@ Dependent factors carry global `FactorId`s, so sets derived from the same uncert
 | `interval_hull`, `to_zonotope` | sound enclosure |
 | `interval_hull_split(tol, max_splits)` | sound enclosure, tightened by branch and bound over `split` |
 | `quadratic_map` | exact without independent generators; otherwise the monomials with a `β` are enclosed |
+| `cubic_map` | exact without independent generators; otherwise the monomials with a `β` are enclosed |
 | `reduce` (`Reduction::Girard`, `Reduction::Pca`), also on `Zonotope` | sound enclosure with at most `order · dim` generators |
 | `interval_map(&IntervalMatrix)`, also on `Zonotope` | sound enclosure: the center map is exact, the radius becomes a box |
 | `intersection(&polytope, max_splits)`, `containment(&polytope, max_splits)`, also on `Zonotope` | three-valued check: `Disjoint` / `Inside` are proofs, the other answers are not |

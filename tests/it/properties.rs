@@ -284,6 +284,45 @@ proptest! {
 }
 
 proptest! {
+    /// Every point `x` of a set maps to `(Σ_a x_a xᵀ T_{i,a} x)ᵢ`, which lies
+    /// in the hull of the cubic map; without independent generators the map
+    /// is exact.
+    #[test]
+    fn cubic_map_commutes_with_evaluation(
+        pz in arb_pz(),
+        t in vec(-2.0..2.0f64, 54),
+        outputs in 1usize..=2,
+        samples in arb_samples(),
+    ) {
+        let n = pz.dim();
+        let t: Vec<Vec<DMatrix<f64>>> = (0..outputs)
+            .map(|o| {
+                (0..n)
+                    .map(|a| DMatrix::from_fn(n, n, |b, c| t[o * 27 + a * 9 + b * 3 + c]))
+                    .collect()
+            })
+            .collect();
+        let mapped = pz.cubic_map(&t);
+        let hull = mapped.interval_hull();
+        let exact = pz.independent_generators().ncols() == 0;
+        for s in &samples {
+            let x = eval(&pz, s);
+            let y = DVector::from_fn(outputs, |o, _| {
+                (0..n).map(|a| x[a] * x.dot(&(&t[o][a] * &x))).sum()
+            });
+
+            prop_assert!(hull.contains(&y, TOL * (1.0 + y.amax())));
+            if exact {
+                let a = alpha_map(pz.ids(), s);
+                let beta = pad(&[], mapped.independent_generators().ncols());
+                let at = mapped.evaluate_with(|k| a[&k], &beta);
+                prop_assert!((&at - &y).amax() <= TOL * (1.0 + y.amax()), "{at} vs {y}");
+            }
+        }
+    }
+}
+
+proptest! {
     /// A reduced zonotope contains the original: its support function is at
     /// least as large in every sampled direction, and it meets the order.
     #[test]

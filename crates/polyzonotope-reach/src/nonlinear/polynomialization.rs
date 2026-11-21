@@ -30,7 +30,13 @@ const TAME: f64 = 1e30;
 pub(super) struct Expansion {
     /// `½ H(z*)` per state, the Hessians at the linearization point.
     half_hessians: Vec<IntervalMatrix>,
-    /// `Ψ_s = { sᵀ Q s }`, over the factors of `X`; `n` rows.
+    /// `T_c = 6 P` per state in interval arithmetic, where the point tensor
+    /// `P ≈ ⅙ ∂³f(z*)` is what the static set applies to `s`. Rounding `⅙`
+    /// makes `P` differ from a sixth of the derivatives, so the dynamic
+    /// terms take `T_c` as the enclosure of `6 P`, which keeps the split
+    /// of the third-order term exact.
+    cubic: Vec<IntervalTensor>,
+    /// `Ψ_s = { sᵀ Q s + P s³ }`, over the factors of `X`; `n` rows.
     pub(super) static_set: SparsePolyZonotope,
     /// `sᵀ R_Q s` bounded per state: the spread of `½ H(z*)` around `Q`,
     /// which only rounding makes nonzero.
@@ -53,11 +59,19 @@ pub(super) fn static_error<D: Dynamics>(
     model: &Linearization,
     x: &SparsePolyZonotope,
     (max_degree, order): (u32, f64),
+    terms: Terms,
 ) -> Result<Expansion, ReachError> {
     let at = points(model.point.iter().copied());
-    if dynamics.third_derivatives(&at).is_none() {
-        return Err(ReachError::MissingDerivatives);
+    let third = dynamics
+        .third_derivatives(&at)
+        .ok_or(ReachError::MissingDerivatives)?;
+    // Before the midpoints: an unbounded entry has a NaN midpoint, which
+    // Interval::point rejects with a panic.
+    if !third.iter().all(|t| tame(tensor_entries(t))) {
+        return Err(ReachError::AbstractionDiverged);
     }
+    let sixth: Vec<IntervalTensor> = third.iter().map(sixth_of_center).collect();
+    let cubic: Vec<IntervalTensor> = sixth.iter().map(times_six).collect();
 
     let n = x.dim();
     let shifted = x.translate(&-DVector::from_column_slice(&model.middle));
@@ -79,14 +93,18 @@ pub(super) fn static_error<D: Dynamics>(
             (c.view((0, 0), (n, n)).into_owned(), r)
         })
         .unzip();
-    let static_set =
-        cap_degree(&shifted.quadratic_map(&quadratic), max_degree).reduce(order, Reduction::Girard);
+    let mut polynomial = shifted.quadratic_map(&quadratic);
+    if terms.has(Term::CubicStatic) {
+        polynomial = polynomial.exact_plus(&shifted.cubic_map(&state_slices(&sixth, n)));
+    }
+    let static_set = cap_degree(&polynomial, max_degree).reduce(order, Reduction::Girard);
     let mut start = hull.0;
     start.resize(model.point.len(), Interval::point(0.0));
 
     Ok(Expansion {
         static_radius: radii.iter().map(|r| spread(r, &start)).collect(),
         half_hessians,
+        cubic,
         static_set,
         start,
     })
@@ -150,7 +168,19 @@ pub(super) fn dynamic_error<D: Dynamics>(
                 (Term::StaticRadius, symmetric(expansion.static_radius[i])),
                 (Term::Cross, cross(h, &expansion.start, &deviation)),
                 (Term::DynamicQuadratic, quadratic_form(h, &deviation)),
-                (Term::Remainder, remainder(&third[i], &boxes.full)),
+                (
+                    Term::CubicCross,
+                    cubic_change(
+                        &expansion.cubic[i],
+                        &expansion.start,
+                        &deviation,
+                        &boxes.full,
+                    ),
+                ),
+                (
+                    Term::Remainder,
+                    remainder(&difference(&third[i], &expansion.cubic[i]), &boxes.full),
+                ),
                 (Term::JacobianSpread, jacobian_spread(model, i, &boxes.full)),
             ];
             parts
@@ -251,6 +281,85 @@ fn remainder(tensor: &IntervalTensor, full: &[Interval]) -> Interval {
     }
 
     sum / Interval::point(6.0)
+}
+
+/// `⅙ Σ_{abc} T_c[abc] (Δz_a Δz_b Δz_c − s_a s_b s_c)`, the part of the cubic
+/// term at `z*` that changes during the step, from the telescoping identity
+/// `Δz_a Δz_b Δz_c − s_a s_b s_c = δ_a Δz_b Δz_c + s_a δ_b Δz_c + s_a s_b δ_c`
+/// with `δ = Δz − s`, each factor in its own box. Exact algebra, so every
+/// product of boxes encloses it; it is `O(w² r)` where the whole cube over
+/// `□Δz` would be `O(w³)`.
+fn cubic_change(
+    tensor: &IntervalTensor,
+    start: &[Interval],
+    deviation: &[Interval],
+    full: &[Interval],
+) -> Interval {
+    let w = full.len();
+    let mut sum = Interval::point(0.0);
+    for a in 0..w {
+        for b in 0..w {
+            for c in 0..w {
+                let change = deviation[a] * full[b] * full[c]
+                    + start[a] * deviation[b] * full[c]
+                    + start[a] * start[b] * deviation[c];
+                sum = sum + tensor[(a, b, c)] * change;
+            }
+        }
+    }
+
+    sum / Interval::point(6.0)
+}
+
+/// `T − T_c` entry by entry: the spread of the third derivatives over the
+/// segment box around the point tensor of the static set.
+fn difference(tensor: &IntervalTensor, cubic: &IntervalTensor) -> IntervalTensor {
+    let d = tensor.dim();
+    let mut out = IntervalTensor::zeros(d);
+    for k in 0..d * d * d {
+        let at = (k / (d * d), (k / d) % d, k % d);
+        out[at] = tensor[at] - cubic[at];
+    }
+
+    out
+}
+
+/// The point tensor `P` of a sixth of the midpoints of `tensor`'s entries,
+/// rounded to nearest.
+fn sixth_of_center(tensor: &IntervalTensor) -> IntervalTensor {
+    map_entries(tensor, |iv| {
+        Interval::point(f64::midpoint(iv.lo, iv.hi) / 6.0)
+    })
+}
+
+/// `6 P` in interval arithmetic, an enclosure of six times the point tensor.
+fn times_six(sixth: &IntervalTensor) -> IntervalTensor {
+    map_entries(sixth, |iv| iv * Interval::point(6.0))
+}
+
+/// `tensor` with `f` applied to every entry.
+fn map_entries(tensor: &IntervalTensor, f: impl Fn(Interval) -> Interval) -> IntervalTensor {
+    let d = tensor.dim();
+    let mut out = IntervalTensor::zeros(d);
+    for k in 0..d * d * d {
+        let at = (k / (d * d), (k / d) % d, k % d);
+        out[at] = f(tensor[at]);
+    }
+
+    out
+}
+
+/// The slices `P[a, :, :]` of the state block of each point tensor, as the
+/// cubic forms of [`SparsePolyZonotope::cubic_map`] for `n` states.
+fn state_slices(sixth: &[IntervalTensor], n: usize) -> Vec<Vec<DMatrix<f64>>> {
+    sixth
+        .iter()
+        .map(|t| {
+            (0..n)
+                .map(|a| DMatrix::from_fn(n, n, |b, c| t[(a, b, c)].lo))
+                .collect()
+        })
+        .collect()
 }
 
 /// The sum of the entries of `tensor` at every distinct ordering of the

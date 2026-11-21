@@ -138,6 +138,22 @@ proptest! {
 }
 
 proptest! {
+    /// `{ c³ }` as the cubic map of the point `c` with `T = [1]`: the stored
+    /// center plus the error generator covers the exact cube.
+    #[test]
+    fn cubic_map_encloses_the_exact_cube(c in 1.0..1e3f64) {
+        let one = DMatrix::from_element(1, 1, 1.0);
+        let mapped = one_factor_pz(c, &[], &[]).cubic_map(&[vec![one]]);
+        let (square, square_err) = two_product(c, c);
+        let (cube, cube_err) = two_product(square, c);
+        // c³ = cube + cube_err + square_err · c, the last term below 1 ulp of the cube.
+        let exact_err = cube_err + square_err * c;
+
+        prop_assert!(within((cube, exact_err), mapped.center()[0], radius(mapped.independent_generators())));
+    }
+}
+
+proptest! {
     /// Girard's box of two parallel 1-D generators `a` and `b` has radius at
     /// least `|a| + |b|`, exactly, after reducing to order 1.
     #[test]

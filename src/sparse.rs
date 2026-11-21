@@ -551,26 +551,7 @@ impl SparsePolyZonotope {
             "every matrix of a quadratic map must be dim × dim"
         );
 
-        // Promote each β to a temporary dependent factor, so the product is one polynomial.
-        let temp = FactorId::fresh_n(self.gi.ncols());
-        let all = hcat(&self.g, &self.gi);
-        let (ids, dep) = (self.id.len(), self.g.ncols());
-        let promoted = DMatrix::from_fn(ids + temp.len(), all.ncols(), |k, t| {
-            match (k < ids, t < dep) {
-                (true, true) => self.e[(k, t)],
-                (false, false) => u32::from(k - ids == t - dep),
-                _ => 0,
-            }
-        });
-        let columns: Vec<DVector<f64>> = all
-            .column_iter()
-            .map(nalgebra::Matrix::into_owned)
-            .collect();
-        let exponents: Vec<Vec<u32>> = promoted
-            .column_iter()
-            .map(|c| c.iter().copied().collect())
-            .collect();
-
+        let (temp, columns, exponents) = self.promoted();
         let mut errs = RowErrors::new(maps.len());
         let center = DVector::from_fn(maps.len(), |i, _| {
             round::bilinear(&self.c, &maps[i], &self.c, i, &mut errs)
@@ -604,6 +585,97 @@ impl SparsePolyZonotope {
         }
         .compact()
         .enclose_factors(&temp)
+    }
+
+    /// `{ (Σ_a x_a xᵀ T_{1,a} x, …, Σ_a x_a xᵀ T_{m,a} x) | x ∈ PZ }`, one output
+    /// dimension per entry of `maps`: entry `i` holds the `dim` slices
+    /// `T_{i,a}` of a cubic form, `T_{i,a}[b, c]` the coefficient of
+    /// `x_a x_b x_c`.
+    ///
+    /// Exact when the set has no independent generators, like
+    /// [`quadratic_map`](Self::quadratic_map); otherwise every monomial that
+    /// involves an independent factor is enclosed and becomes an independent
+    /// generator of the result. The degree of the result is three times that
+    /// of the set.
+    ///
+    /// # Panics
+    ///
+    /// Panics if an entry of `maps` does not hold `dim` matrices of size
+    /// `dim × dim`, or if an exponent of the result overflows `u32`.
+    #[must_use]
+    pub fn cubic_map(&self, maps: &[Vec<DMatrix<f64>>]) -> Self {
+        let dim = self.dim();
+        assert!(
+            maps.iter()
+                .all(|t| t.len() == dim && t.iter().all(|m| m.shape() == (dim, dim))),
+            "every cubic form must have dim slices of size dim × dim"
+        );
+
+        let (temp, mut columns, mut exponents) = self.promoted();
+        // The center joins as column 0 with the zero exponent, so the
+        // expansion of (c + Σ hₜ mₜ)³ is one loop over column triples.
+        columns.insert(0, self.c.clone());
+        exponents.insert(0, alloc::vec![0; self.id.len() + temp.len()]);
+
+        let mut errs = RowErrors::new(maps.len());
+        let mut center = DVector::zeros(maps.len());
+        let mut gens = Vec::new();
+        let mut exps = Vec::new();
+        for t in 0..columns.len() {
+            for u in t..columns.len() {
+                for v in u..columns.len() {
+                    let triple = [&columns[t], &columns[u], &columns[v]];
+                    let coefficient = symmetric_triple_products(maps, triple, &mut errs);
+                    if v == 0 {
+                        center = coefficient;
+                    } else {
+                        gens.push(coefficient);
+                        let pair = add_exponents(&exponents[t], &exponents[u]);
+                        exps.push(add_exponents(&pair, &exponents[v]));
+                    }
+                }
+            }
+        }
+
+        let mut id = self.id.clone();
+        id.extend_from_slice(&temp);
+        Self {
+            c: center,
+            g: from_column_list(maps.len(), &gens),
+            gi: errs.generators(),
+            e: from_column_list(id.len(), &exps),
+            id,
+        }
+        .compact()
+        .enclose_factors(&temp)
+    }
+
+    /// The generators as one polynomial: every `β` promoted to a temporary
+    /// dependent factor of its own, so a polynomial map can multiply out all
+    /// generators alike. Returns the temporary factors, the dependent then
+    /// the independent generators, and the exponents of each over the
+    /// factors of the set followed by the temporary ones.
+    fn promoted(&self) -> (Vec<FactorId>, Vec<DVector<f64>>, Vec<Vec<u32>>) {
+        let temp = FactorId::fresh_n(self.gi.ncols());
+        let all = hcat(&self.g, &self.gi);
+        let (ids, dep) = (self.id.len(), self.g.ncols());
+        let promoted = DMatrix::from_fn(ids + temp.len(), all.ncols(), |k, t| {
+            match (k < ids, t < dep) {
+                (true, true) => self.e[(k, t)],
+                (false, false) => u32::from(k - ids == t - dep),
+                _ => 0,
+            }
+        });
+        let columns = all
+            .column_iter()
+            .map(nalgebra::Matrix::into_owned)
+            .collect();
+        let exponents = promoted
+            .column_iter()
+            .map(|c| c.iter().copied().collect())
+            .collect();
+
+        (temp, columns, exponents)
     }
 
     /// Enclosure with at most `order · dim` generators, dependent and
@@ -766,6 +838,35 @@ fn symmetric_products(
         let b_a = round::bilinear(b, &q[i], a, i, errs);
         round::add(a_b, b_a, i, errs)
     })
+}
+
+/// The coefficient of the monomial `m_a m_b m_c` in each cubic form of
+/// `maps` applied to `Σ hₜ mₜ`, for the columns `[h_a, h_b, h_c]` with
+/// `a ≤ b ≤ c`: `T(p, q, r)` summed over every distinct ordering of the
+/// three, with rounding errors in `errs`.
+fn symmetric_triple_products(
+    maps: &[Vec<DMatrix<f64>>],
+    [a, b, c]: [&DVector<f64>; 3],
+    errs: &mut RowErrors,
+) -> DVector<f64> {
+    let mut orderings = alloc::vec![[a, b, c]];
+    for ordering in [[a, c, b], [b, a, c], [b, c, a], [c, a, b], [c, b, a]] {
+        if !orderings.iter().any(|o| same_columns(o, &ordering)) {
+            orderings.push(ordering);
+        }
+    }
+
+    DVector::from_fn(maps.len(), |i, _| {
+        orderings.iter().fold(0.0, |acc, [p, q, r]| {
+            let term = round::trilinear(p, &maps[i], q, r, i, errs);
+            round::add(acc, term, i, errs)
+        })
+    })
+}
+
+/// Whether two orderings name the same columns at every position.
+fn same_columns(x: &[&DVector<f64>; 3], y: &[&DVector<f64>; 3]) -> bool {
+    x.iter().zip(y).all(|(p, q)| core::ptr::eq(*p, *q))
 }
 
 /// Exponents of the product of two monomials.

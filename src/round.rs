@@ -72,6 +72,25 @@ mod sound {
         split(acc)
     }
 
+    /// `Σ_a p_a qᵀ T_a r`, and a bound on its error.
+    pub(crate) fn trilinear(
+        p: &DVector<f64>,
+        t: &[DMatrix<f64>],
+        q: &DVector<f64>,
+        r: &DVector<f64>,
+    ) -> (f64, f64) {
+        let mut acc = point(0.0);
+        for (a, &x) in p.iter().enumerate() {
+            for (b, &y) in q.iter().enumerate() {
+                for (c, &z) in r.iter().enumerate() {
+                    acc = (point(x) * point(t[a][(b, c)]) * point(y)).mul_add(point(z), acc);
+                }
+            }
+        }
+
+        split(acc)
+    }
+
     /// Per row, an upper bound of `|I − U Uᵀ| s` for `s >= 0`.
     pub(crate) fn residual_bound(u: &DMatrix<f64>, s: &DVector<f64>) -> DVector<f64> {
         let n = u.nrows();
@@ -168,6 +187,17 @@ mod plain {
     /// `aᵀ Q b` by nalgebra, with no error bound.
     pub(crate) fn bilinear(a: &DVector<f64>, q: &DMatrix<f64>, b: &DVector<f64>) -> (f64, f64) {
         (a.dot(&(q * b)), 0.0)
+    }
+
+    /// `Σ_a p_a qᵀ T_a r` by nalgebra, with no error bound.
+    pub(crate) fn trilinear(
+        p: &DVector<f64>,
+        t: &[DMatrix<f64>],
+        q: &DVector<f64>,
+        r: &DVector<f64>,
+    ) -> (f64, f64) {
+        let sum = p.iter().zip(t).map(|(&x, m)| x * q.dot(&(m * r))).sum();
+        (sum, 0.0)
     }
 
     /// Zero: plain mode takes the computed `U` as exactly orthogonal.
@@ -336,6 +366,34 @@ pub(crate) fn bilinear(
     let (v, e) = backend::bilinear(left, matrix, right);
     errs.record(row, e);
     v
+}
+
+/// `Σ_a p_a qᵀ T_a r` for `p = first`, `q = second`, `r = third` and the
+/// slices `T_a` of `slices`, with its rounding error recorded on `row` of
+/// `errs`.
+///
+/// # Panics
+///
+/// Panics if `slices` does not hold one `second.len() × third.len()` matrix
+/// per entry of `first`.
+pub(crate) fn trilinear(
+    first: &DVector<f64>,
+    slices: &[DMatrix<f64>],
+    second: &DVector<f64>,
+    third: &DVector<f64>,
+    row: usize,
+    errs: &mut RowErrors,
+) -> f64 {
+    assert!(
+        slices.len() == first.len()
+            && slices
+                .iter()
+                .all(|m| m.shape() == (second.len(), third.len())),
+        "slices must match all three vectors"
+    );
+    let (value, err) = backend::trilinear(first, slices, second, third);
+    errs.record(row, err);
+    value
 }
 
 /// `a + b` for scalars, with the rounding error recorded on `row` of `errs`.

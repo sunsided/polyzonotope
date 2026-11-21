@@ -255,6 +255,20 @@ fn cubic() -> Scenario {
     }
 }
 
+/// `x₀' = x₀⁴`, `x₁' = −x₁` around the origin, where the second and third
+/// derivatives vanish. Narrower than [`cubic`]: from radius 0.5 the step
+/// does not converge without splitting.
+fn quartic() -> Scenario {
+    Scenario {
+        dynamics: Polynomial::new(2, 1)
+            .term(0, 1.0, &[4, 0, 0])
+            .term(1, -1.0, &[0, 1, 0]),
+        field: |x, _| [x[0] * x[0] * x[0] * x[0], -x[1]],
+        radius: 0.3,
+        ..cubic()
+    }
+}
+
 /// `x₀' = x₀ x₁`, `x₁' = 1 + x₀` from a box around the origin: the error
 /// `(x₀ − x₀*)(x₁ − x₁*)` is all cross term at first, since `x₁` starts as
 /// a point and races ahead fastest where `x₀` is largest, so `δ` does not
@@ -329,10 +343,24 @@ fn polynomialization_needs_the_dynamic_quadratic() {
 }
 
 /// Polynomialization: at the origin the cubic has no second-order part, so
-/// only the third-order remainder holds the drift.
+/// the cubic form of the static set holds the drift of the wide set.
+#[test]
+fn polynomialization_needs_the_cubic_static_set() {
+    cubic().shows(Method::Polynomialization, Term::CubicStatic);
+}
+
+/// Polynomialization: the cubic moves with the set during the step, by
+/// `3 s² δ` and the higher terms, which the static set cannot see.
+#[test]
+fn polynomialization_needs_the_cubic_change() {
+    cubic().shows(Method::Polynomialization, Term::CubicCross);
+}
+
+/// Polynomialization: the third derivatives of `x₀⁴` vanish at the origin,
+/// so only the remainder around them holds the drift.
 #[test]
 fn polynomialization_needs_the_remainder() {
-    cubic().shows(Method::Polynomialization, Term::Remainder);
+    quartic().shows(Method::Polynomialization, Term::Remainder);
 }
 
 /// Polynomialization: the input varying during the step enters through

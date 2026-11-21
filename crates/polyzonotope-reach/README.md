@@ -59,12 +59,12 @@ Sets grow by a few generators per step. Call `reduce` from `polyzonotope` betwee
 
 ### Conservative polynomialization
 
-`Method::Polynomialization` (Althoff 2013) keeps the second-order error at the start set as a polynomial zonotope over the set's factors. It needs `Dynamics::third_derivatives`, and refuses with `ReachError::MissingDerivatives` without them. With `s = (x_k − x_m, 0)` the start of a trajectory relative to the middle `x_m` of the set, and `δ(t) = Δz(t) − s` what changes during the step, the error splits exactly into:
+`Method::Polynomialization` (Althoff 2013) keeps the second- and third-order error at the start set as a polynomial zonotope over the set's factors. It needs `Dynamics::third_derivatives`, and refuses with `ReachError::MissingDerivatives` without them. With `s = (x_k − x_m, 0)` the start of a trajectory relative to the middle `x_m` of the set, and `δ(t) = Δz(t) − s` what changes during the step, the error splits exactly into:
 
-- the static part `sᵀ Q s` with `Q = ½ H(z*)`. It depends on `x_k` alone, so it is computed once per step with `quadratic_map` over the factors of `X`. It enters as the constant input `v` of the augmented system `x' = A x + v, v' = 0`, started from `X × Ψ_s`, and keeps its dependencies.
-- the dynamic part: `sᵀ (½H) δ + δᵀ (½H) s + δᵀ (½H) δ`, a third-order Lagrange remainder `⅙ Σ ∂³f(ξ) Δz Δz Δz` over a box that holds every segment from `z*`, and the rounding spreads of `J(z*)` and `H(z*)`. All of it goes through interval arithmetic and into the guessed box `Ψ̄`. The state part of `δ` comes from the flow, `[0, r] f(□R(τ) × □U)` minus the half step.
+- the static part `sᵀ Q s + P s³` with `Q = ½ H(z*)` and `P ≈ ⅙ ∂³f(z*)`. It depends on `x_k` alone, so it is computed once per step with `quadratic_map` and `cubic_map` over the factors of `X`. It enters as the constant input `v` of the augmented system `x' = A x + v, v' = 0`, started from `X × Ψ_s`, and keeps its dependencies.
+- the dynamic part: `sᵀ (½H) δ + δᵀ (½H) s + δᵀ (½H) δ`, the change `P (Δz³ − s³)` of the cubic term during the step, the Lagrange remainder `⅙ Σ (∂³f(ξ) − 6P) Δz Δz Δz` over a box that holds every segment from `z*`, and the rounding spreads of `J(z*)` and `H(z*)`. For a field of degree 3 or less, `∂³f` is constant and that remainder comes from rounding only. All of it goes through interval arithmetic and into the guessed box `Ψ̄`. The state part of `δ` comes from the flow, `[0, r] f(□R(τ) × □U)` minus the half step.
 
-The inputs are never static, since `u(t)` may jump inside `U` during the step: every term with `u − u*` is dynamic. The static error doubles the degree of the set with each step, so monomials above `max_degree` (default 4) are enclosed as independent generators. The rustdoc of `Method::Polynomialization` has the full soundness argument.
+The inputs are never static, since `u(t)` may jump inside `U` during the step: every term with `u − u*` is dynamic. The static error triples the degree of the set with each step, so monomials above `max_degree` (default 4) are enclosed as independent generators. The rustdoc of `Method::Polynomialization` has the full soundness argument.
 
 ### Keeping dependencies through reduction
 
@@ -143,14 +143,12 @@ The linear tests compare against reference trajectories: matrix exponentials of 
 
 The nonlinear tests run every scenario with both methods: Van der Pol with an input, a pendulum with a torque input, a cubic drift that the linearization cannot see, Van der Pol from a single point, a spring whose stiffness is the input (`∂²f/∂x∂u ≠ 0`), and a damped cubic whose pieces split and later merge. Trajectories are integrated with a fine RK4 in `f64`. Every third holds the input at its upper end, every third at its lower end, and the rest jump every sub-step. They must stay inside the time-point set at every step end and inside the time-interval set at every sub-step. For linear dynamics, a step must give the same sets as `LinearReach`. Further tests check that an oversized set is refused, that a degree-9 field that overflows `f64` is refused instead of panicking, that missing third derivatives are refused at once, that the degree stays capped over 60 steps, that splitting carries a set that one piece cannot, that a failed run keeps its proven steps, that lifting keeps a wide set narrow, and that adaptive steps shrink where a fixed step fails and grow after easy steps. The Monte Carlo checks integrate each step over its own duration.
 
-In-crate mutation tests drop one error term at a time, each in a scenario built for it, and show a trajectory escaping: the quadratic error and the Hessian spread for linearization, and the static set, the cross term, `δᵀ H δ`, the remainder and the input part of `δ` for polynomialization. The spreads of `J(z*)` and `H(z*)` come from rounding only, and no sampling can show them.
+In-crate mutation tests drop one error term at a time, each in a scenario built for it, and show a trajectory escaping: the quadratic error and the Hessian spread for linearization, and the static set, its cubic form, the cross term, `δᵀ H δ`, the change of the cubic term, the remainder and the input part of `δ` for polynomialization. The spreads of `J(z*)` and `H(z*)` come from rounding only, and no sampling can show them.
 
 ## Roadmap
 
 1. A tighter dynamic error for wide sets. From `ρ = 1`, Van der Pol fails because the error box feeds on itself.
-2. Splitting lifted pieces, so that polynomialization with lifting needs no more pieces than without.
-3. A cubic map for the third-order terms at `z*`, so that the static part of the remainder also stays polynomial.
-4. A cross-check of the reachable sets against CORA, for linear and nonlinear systems.
+2. A cross-check of the reachable sets against CORA, for linear and nonlinear systems.
 
 ## License
 
