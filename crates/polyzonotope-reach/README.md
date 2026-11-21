@@ -147,10 +147,10 @@ In-crate mutation tests drop one error term at a time, each in a scenario built 
 
 ## Roadmap
 
-1. A tighter dynamic error for wide sets. From `ρ = 1`, Van der Pol now fails because the error box feeds on itself, not because of the reduction. In trials, three changes left the proven time at 0.40 s and the width at 0.16 s at 9.39. They were an order that doubles, up to 160, until the Girard reduction widens the hull by at most 2%; boxing only the independent part before lifting; and lifting the time-interval set as well.
-2. Splitting lifted pieces as well as unlifted ones. On the damped cubic, polynomialization with lifting needs 12 pieces where it needs 6 without, so with `max_pieces` 8 it diverges at step 7; with 32 pieces it ends 17% narrower than without lifting. Three fixes failed in trials: falling back to `Off` when the lifted start is refused, keeping the narrower of the two steps, and lifting only until the first split (14 steps instead of 6). Lifted factors appear in many monomials after one step, so they cannot be turned back into independent generators.
+1. A tighter dynamic error for wide sets. From `ρ = 1`, Van der Pol fails because the error box feeds on itself.
+2. Splitting lifted pieces, so that polynomialization with lifting needs no more pieces than without.
 3. A cubic map for the third-order terms at `z*`, so that the static part of the remainder also stays polynomial.
-4. A cross-check against CORA's `linearSys` reach (it runs under Octave), and a generator script for the nonlinear case. That one needs MATLAB, because CORA's symbolic derivatives do not run under Octave.
+4. A cross-check of the reachable sets against CORA, for linear and nonlinear systems.
 
 ## License
 
