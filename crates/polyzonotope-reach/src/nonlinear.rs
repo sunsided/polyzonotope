@@ -165,8 +165,8 @@ pub enum Method {
 pub enum Splitting {
     /// Factor splits and box splits compete, and the one whose larger half
     /// has the smaller second-order error bound wins, split by split. The
-    /// default: on the cubic drift `x₀' = x₀³` from radius 0.5, factor
-    /// splits alone needed 30 pieces where this needs 4.
+    /// default: on the cubic drift `x₀' = x₀³` from radius 0.5, linearization
+    /// with factor splits alone needs 4 pieces where this needs 2.
     #[default]
     Cheapest,
     /// Factor splits only: every piece keeps all dependencies of the start
@@ -190,7 +190,7 @@ pub enum Restructure {
     /// exact (`g β` with `β ∈ [-1, 1]` is the monomial `g α` of a factor
     /// nowhere else), and from then on the quadratic maps of later steps
     /// treat it as a polynomial: `α²` stays non-negative and products
-    /// cancel. The default, at 2 to 3 times the cost per step. The number
+    /// cancel. The default, at 1.5 to 1.7 times the cost. The number
     /// of factors stays at most the number of generators, since
     /// [`compact`](polyzonotope::SparsePolyZonotope::compact) drops the
     /// unused ones.
@@ -235,9 +235,9 @@ pub struct NonlinearSettings {
     /// are not undone while the pieces are still too large to step whole.
     pub merge_tolerance: f64,
     /// Highest total degree the static error of
-    /// [`Method::Polynomialization`] keeps exact, at least 1. It is
-    /// quadratic in the set, so without a cap the degree of the sets would
-    /// double with every step; higher monomials are enclosed in independent
+    /// [`Method::Polynomialization`] keeps exact, at least 1. It is cubic
+    /// in the set, so without a cap the degree of the sets would triple
+    /// with every step; higher monomials are enclosed in independent
     /// generators.
     pub max_degree: u32,
     /// Whether the time-point set's independent generators become
