@@ -10,6 +10,22 @@
 
 Reachable-set over-approximation for dynamical systems, with the sparse polynomial zonotopes of [`polyzonotope`](https://crates.io/crates/polyzonotope).
 
+Given a set of start states and a set of inputs, the crate computes flowpipes: for each time step, one set that holds every state at the end of the step and one that holds every state during it. `LinearReach` handles `x' = A x + B u` with a Taylor-series matrix exponential and an enclosed remainder; `NonlinearReach` handles `x' = f(x, u)` by conservative linearization or conservative polynomialization, with set splitting, merging and adaptive steps. A step it cannot prove is refused rather than returned, and with the `sound` feature the floating-point rounding is enclosed as well. The crate is `no_std` with `alloc`.
+
+## Who this is for
+
+- Control and verification engineers who need to show that a vehicle, drone, pendulum or oscillator stays within bounds for every initial state and every input signal in a given range, not only for a handful of simulated runs.
+- Researchers comparing reachability methods: both nonlinear abstractions run on the same `Dynamics`, and the linear results are cross-checked against [CORA](https://github.com/TUMcps/CORA).
+- Planners that need a reachable set per edge: [robust-planning](https://github.com/sunsided/robust-planning) proves the edges of its trees and searches safe with a reachable-set model, which can be built on this crate.
+- For the set types and operations alone (maps, sums, reductions, polytope checks) without any dynamics, [polyzonotope](https://github.com/sunsided/polyzonotope) is enough.
+
+## Installation
+
+```toml
+[dependencies]
+polyzonotope-reach = "0.1"
+```
+
 ## Linear systems
 
 `LinearReach` propagates `x' = A x + B u`, where the input `u(t)` can be any integrable signal with values in a zonotope `U`. Each step `[t_k, t_k + r]` returns two sets:

@@ -21,7 +21,7 @@ private_intra_doc_links = "allow"
 
 [package]
 name = "polyzonotope"
-description = "Sparse polynomial zonotopes, zonotopes and interval boxes for set-based reachability analysis"
+description = "Sparse polynomial zonotopes, zonotopes and interval boxes for set-based reachability analysis, no_std and optionally with outward rounding"
 version = "0.4.0"
 edition = "2024"
 license = "MIT OR Apache-2.0"
@@ -29,7 +29,7 @@ rust-version = "1.89"
 repository = "https://github.com/sunsided/polyzonotope"
 readme = "README.md"
 keywords = ["zonotope", "polynomial-zonotope", "reachability", "set-based", "verification"]
-categories = ["mathematics", "science", "algorithms"]
+categories = ["mathematics", "science", "algorithms", "no-std"]
 
 [package.metadata.docs.rs]
 all-features = true
