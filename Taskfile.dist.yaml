@@ -153,6 +153,7 @@ tasks:
       - cargo test --workspace --no-default-features
       - cargo build --no-default-features --target thumbv7em-none-eabihf
       - cargo build --no-default-features --features portable-atomic/critical-section --target thumbv6m-none-eabi
+      - cargo build -p polyzonotope-reach --no-default-features --target thumbv7em-none-eabihf
 
   msrv:
     desc: Check every crate on its declared rust-version

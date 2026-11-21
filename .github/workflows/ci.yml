@@ -188,6 +188,7 @@ jobs:
       - run: cargo build --no-default-features --target thumbv7em-none-eabihf
       # Cortex-M0: no atomic read-modify-write at all, so portable-atomic needs a critical section.
       - run: cargo build --no-default-features --features portable-atomic/critical-section --target thumbv6m-none-eabi
+      - run: cargo build -p polyzonotope-reach --no-default-features --target thumbv7em-none-eabihf
 
   msrv:
     name: MSRV

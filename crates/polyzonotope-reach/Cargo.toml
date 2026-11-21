@@ -15,6 +15,9 @@ publish = false
 [dependencies]
 polyzonotope = { version = "0.2", path = "../..", default-features = false }
 
+nalgebra = { version = "0.35", default-features = false, features = ["alloc", "libm"] }
+libm = "0.2"
+
 [features]
 default = ["std"]
 std = ["polyzonotope/std"]
@@ -23,3 +26,8 @@ sound = ["std", "polyzonotope/sound"]
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+# The tests' reference solution uses nalgebra's matrix exponential, which needs std.
+nalgebra = { version = "0.35", features = ["std"] }
+proptest = "1"
