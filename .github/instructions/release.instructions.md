@@ -13,8 +13,8 @@ summary: Crate metadata, per-crate versions, deny policy, release-plz and truste
 - Every publishable crate has `description`, `license`, `repository`, `readme`, `keywords`
   (at most 5) and `categories` (valid crates.io slugs), and declares `rust-version`. Crates that
   are not published have `publish = false`.
-- The crate is tagged `vX.Y.Z`. A second crate (the planned `polyzonotope-reach`) gets its
-  own version and `<crate>-vX.Y.Z` tags; `publish-crates-io.yml` must learn that tag form first.
+- `polyzonotope` is tagged `vX.Y.Z`; `polyzonotope-reach` has its own version and
+  `polyzonotope-reach-vX.Y.Z` tags. `publish-crates-io.yml` maps each tag form to its crate.
 - New dependencies must pass `cargo deny check`: allowed licenses, no advisories, no git or
   unknown-registry sources. Path dependencies of publishable crates carry a `version`.
 - `rust-version` is a signal, not a contract. Raising it is allowed when a dependency or a

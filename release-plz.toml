@@ -40,10 +40,11 @@ commit_parsers = [
 name = "polyzonotope"
 git_tag_name = "v{{ version }}"
 
-# Not released yet (publish = false in its Cargo.toml); enable together with its first release.
+# Explicit, because the default tag form depends on how many crates are public: a second
+# crate must never fall back to plain vX.Y.Z and collide with the main crate's tags.
 [[package]]
 name = "polyzonotope-reach"
-release = false
+git_tag_name = "polyzonotope-reach-v{{ version }}"
 
 # Per-crate overrides. Examples:
 # [[package]]

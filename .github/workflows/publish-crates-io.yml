@@ -1,5 +1,6 @@
-# Publishes the crate when release-plz pushes its vX.Y.Z tag.
-# Runs in the `crates-io` environment, which only allows v*.*.* tags.
+# Publishes a crate when release-plz pushes its tag: vX.Y.Z for polyzonotope,
+# polyzonotope-reach-vX.Y.Z for polyzonotope-reach.
+# Runs in the `crates-io` environment, which must allow both tag forms.
 # crates.io trusted publishing is bound to this file name and environment: do not rename either.
 name: Publish
 
@@ -9,6 +10,8 @@ on:
       # SemVer 2.0 releases and pre-releases (v1.2.0, v1.2.0-rc.1).
       - 'v[0-9]+.[0-9]+.[0-9]+'
       - 'v[0-9]+.[0-9]+.[0-9]+-*'
+      - 'polyzonotope-reach-v[0-9]+.[0-9]+.[0-9]+'
+      - 'polyzonotope-reach-v[0-9]+.[0-9]+.[0-9]+-*'
 
 permissions: {}
 
@@ -62,8 +65,10 @@ jobs:
       - name: Resolve crate and version from the tag
         id: crate
         run: |
-          name=polyzonotope
-          version="${GITHUB_REF_NAME#v}"
+          case "$GITHUB_REF_NAME" in
+            polyzonotope-reach-v*) name=polyzonotope-reach; version="${GITHUB_REF_NAME#polyzonotope-reach-v}" ;;
+            *) name=polyzonotope; version="${GITHUB_REF_NAME#v}" ;;
+          esac
           actual="$(cargo metadata --no-deps --format-version 1 \
             | jq -r --arg n "$name" '.packages[] | select(.name == $n) | .version')"
           if [ "$actual" != "$version" ]; then
@@ -85,6 +90,22 @@ jobs:
         env:
           CRATE: ${{ steps.crate.outputs.name }}
           VERSION: ${{ steps.crate.outputs.version }}
+      # release-plz pushes both tags of a joint release at once; the reach crate can only be
+      # published once the polyzonotope version it was tagged with is in the crates.io index.
+      - name: Wait for polyzonotope in the index
+        if: steps.check.outputs.published != 'true' && steps.crate.outputs.name == 'polyzonotope-reach'
+        run: |
+          base="$(cargo metadata --no-deps --format-version 1 \
+            | jq -r '.packages[] | select(.name == "polyzonotope") | .version')"
+          for _ in $(seq 60); do
+            if curl -sf -A "$GITHUB_REPOSITORY publish workflow" https://index.crates.io/po/ly/polyzonotope \
+              | jq -e --arg v "$base" 'select(.vers == $v)' > /dev/null; then
+              exit 0
+            fi
+            sleep 20
+          done
+          echo "::error::polyzonotope $base did not reach the crates.io index within 20 minutes"
+          exit 1
       - if: steps.check.outputs.published != 'true'
         uses: rust-lang/crates-io-auth-action@3268eb413133e2960fa4ae0e963ca76380c54cd9 # v1.0.6
         id: auth
