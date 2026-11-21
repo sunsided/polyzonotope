@@ -1,6 +1,14 @@
 # polyzonotope-reach
 
-Reachable-set over-approximation for dynamical systems, with the sparse polynomial zonotopes of [`polyzonotope`](https://crates.io/crates/polyzonotope). Not released yet.
+[![crates.io](https://img.shields.io/crates/v/polyzonotope-reach.svg)](https://crates.io/crates/polyzonotope-reach)
+[![docs.rs](https://img.shields.io/docsrs/polyzonotope-reach)](https://docs.rs/polyzonotope-reach)
+[![CI](https://github.com/sunsided/polyzonotope/actions/workflows/ci.yml/badge.svg)](https://github.com/sunsided/polyzonotope/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/sunsided/polyzonotope/graph/badge.svg)](https://codecov.io/gh/sunsided/polyzonotope)
+[![MSRV](https://img.shields.io/crates/msrv/polyzonotope-reach)](https://crates.io/crates/polyzonotope-reach)
+[![License](https://img.shields.io/crates/l/polyzonotope-reach)](https://github.com/sunsided/polyzonotope#license)
+[![unsafe forbidden](https://img.shields.io/badge/unsafe-forbidden-success.svg)](https://github.com/rust-secure-code/safety-dance/)
+
+Reachable-set over-approximation for dynamical systems, with the sparse polynomial zonotopes of [`polyzonotope`](https://crates.io/crates/polyzonotope).
 
 ## Linear systems
 
