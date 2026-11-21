@@ -105,13 +105,19 @@ fn theirs(hulls: &DMatrix<f64>, k: usize) -> Vec<(f64, f64)> {
 }
 
 /// The largest distance between matching bounds of `ours` and `theirs`,
-/// relative to the width of the reference hull.
+/// relative to the widest coordinate of the reference hull, so that a
+/// degenerate coordinate does not divide by zero.
 fn mismatch(ours: &IntervalBox, theirs: &[(f64, f64)]) -> f64 {
+    let widest = theirs
+        .iter()
+        .map(|&(lo, hi)| hi - lo)
+        .fold(f64::MIN_POSITIVE, f64::max);
     ours.0
         .iter()
         .zip(theirs)
-        .map(|(iv, &(lo, hi))| (iv.lo - lo).abs().max((iv.hi - hi).abs()) / (hi - lo))
+        .map(|(iv, &(lo, hi))| (iv.lo - lo).abs().max((iv.hi - hi).abs()))
         .fold(0.0, f64::max)
+        / widest
 }
 
 /// The time-point sets are `e^{Ar} X` plus the input responses on both

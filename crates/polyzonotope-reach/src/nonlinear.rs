@@ -198,7 +198,8 @@ pub enum Restructure {
     /// exact (`g β` with `β ∈ [-1, 1]` is the monomial `g α` of a factor
     /// nowhere else), and from then on the quadratic maps of later steps
     /// treat it as a polynomial: `α²` stays non-negative and products
-    /// cancel. It costs 1.5 to 1.7 times as much as [`Off`](Self::Off). The number
+    /// cancel. Where nothing merges, it costs 1.5 to 1.7 times as much as
+    /// [`Off`](Self::Off) (40 steps of Van der Pol from radius 0.5). The number
     /// of factors stays at most the number of generators, since
     /// [`compact`](polyzonotope::SparsePolyZonotope::compact) drops the
     /// unused ones.
