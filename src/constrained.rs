@@ -302,26 +302,12 @@ impl ConstrainedPolyZonotope {
     /// Pieces of the stacked set that might satisfy the constraints, after at
     /// most `max_splits` splits of the widest one.
     fn feasible_pieces(&self, max_splits: usize) -> Vec<SparsePolyZonotope> {
-        let width = |pz: &SparsePolyZonotope| {
-            pz.interval_hull()
-                .0
-                .iter()
-                .map(Interval::width)
-                .sum::<f64>()
-        };
         let mut pieces: Vec<SparsePolyZonotope> = vec![self.stacked.clone()];
         for _ in 0..max_splits {
             pieces.retain(|p| self.might_be_feasible(p));
-            let candidates =
-                (0..pieces.len()).filter_map(|i| Some((i, pieces[i].heaviest_factor_overall()?)));
-            let Some((i, factor)) =
-                candidates.max_by(|a, b| width(&pieces[a.0]).total_cmp(&width(&pieces[b.0])))
-            else {
+            if !SparsePolyZonotope::split_widest(&mut pieces) {
                 break;
-            };
-            let (lower, upper) = pieces.swap_remove(i).split(factor);
-            pieces.push(lower);
-            pieces.push(upper);
+            }
         }
 
         pieces.retain(|p| self.might_be_feasible(p));

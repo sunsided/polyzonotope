@@ -34,7 +34,7 @@ impl SparsePolyZonotope {
                 return Intersection::Intersects;
             }
 
-            let Some(factor) = piece.heaviest_factor_overall() else {
+            let Some(factor) = piece.heaviest_factor(None) else {
                 return Intersection::Unknown;
             };
             if splits == max_splits {
@@ -90,6 +90,19 @@ impl SparsePolyZonotope {
     /// what plots of curved sets use.
     #[must_use]
     pub fn split_pieces(&self, splits: usize) -> Vec<Self> {
+        let mut pieces = vec![self.clone()];
+        for _ in 0..splits {
+            if !Self::split_widest(&mut pieces) {
+                break;
+            }
+        }
+
+        pieces
+    }
+
+    /// Splits the widest of `pieces` that has a factor left, by the sum of
+    /// its hull's widths, along its heaviest factor; `false` if none has one.
+    pub(crate) fn split_widest(pieces: &mut Vec<Self>) -> bool {
         let width = |pz: &Self| {
             pz.interval_hull()
                 .0
@@ -97,21 +110,18 @@ impl SparsePolyZonotope {
                 .map(crate::Interval::width)
                 .sum::<f64>()
         };
-        let mut pieces = vec![self.clone()];
-        for _ in 0..splits {
-            let splittable =
-                (0..pieces.len()).filter_map(|i| Some((i, pieces[i].heaviest_factor_overall()?)));
-            let Some((i, factor)) =
-                splittable.max_by(|a, b| width(&pieces[a.0]).total_cmp(&width(&pieces[b.0])))
-            else {
-                break;
-            };
-            let (lower, upper) = pieces.swap_remove(i).split(factor);
-            pieces.push(lower);
-            pieces.push(upper);
-        }
+        let splittable =
+            (0..pieces.len()).filter_map(|i| Some((i, pieces[i].heaviest_factor(None)?)));
+        let Some((i, factor)) =
+            splittable.max_by(|a, b| width(&pieces[a.0]).total_cmp(&width(&pieces[b.0])))
+        else {
+            return false;
+        };
+        let (lower, upper) = pieces.swap_remove(i).split(factor);
+        pieces.push(lower);
+        pieces.push(upper);
 
-        pieces
+        true
     }
 
     /// The 1-D set `{ aᵀ x | x ∈ self }` for the facet normal `a`.
@@ -147,7 +157,7 @@ impl SparsePolyZonotope {
 
     /// Factor values that push `aᵀ x` down: each `β` and each `α_k` that
     /// appears alone with an odd power at the sign opposite to its pull.
-    fn descent_corner(&self, a: &nalgebra::DVector<f64>) -> (Vec<f64>, Vec<f64>) {
+    pub(super) fn descent_corner(&self, a: &nalgebra::DVector<f64>) -> (Vec<f64>, Vec<f64>) {
         let down = |x: f64| {
             if x > 0.0 {
                 -1.0
@@ -180,20 +190,19 @@ impl SparsePolyZonotope {
         (alpha, beta)
     }
 
-    /// The factor whose monomials weigh most over all dimensions, by
-    /// `Σ_j ‖G[:, j]‖₁ E[k, j]`; `None` if no monomial depends on a factor
-    /// that [`split`](Self::split) accepts.
-    pub(crate) fn heaviest_factor_overall(&self) -> Option<FactorId> {
+    /// The factor whose monomials weigh most, by `Σ_j |G[dim, j]| E[k, j]`
+    /// for one dimension `dim`, or `Σ_j ‖G[:, j]‖₁ E[k, j]` over all of them
+    /// for `None`; `None` if no monomial depends on a factor that
+    /// [`split`](Self::split) accepts.
+    pub(crate) fn heaviest_factor(&self, dim: Option<usize>) -> Option<FactorId> {
         let (g, e) = (self.dependent_generators(), self.exponents());
-        let weight = |k: usize| -> f64 {
-            (0..g.ncols())
-                .map(|j| g.column(j).lp_norm(1) * f64::from(e[(k, j)]))
-                .sum()
-        };
+        let size = |j: usize| dim.map_or_else(|| g.column(j).lp_norm(1), |d| g[(d, j)].abs());
+        let weight =
+            |k: usize| -> f64 { (0..g.ncols()).map(|j| size(j) * f64::from(e[(k, j)])).sum() };
 
         (0..self.ids().len())
             .map(|k| (k, weight(k)))
-            .filter(|&(k, w)| w > 0.0 && self.can_split(k))
+            .filter(|&(k, w)| w > 0.0 && self.can_split_row(k))
             .max_by(|x, y| x.1.total_cmp(&y.1))
             .map(|(k, _)| self.ids()[k])
     }

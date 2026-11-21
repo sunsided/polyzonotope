@@ -1,7 +1,8 @@
 //! Interval hulls tightened by recursive splitting.
 
 use alloc::vec;
-use alloc::vec::Vec;
+
+use nalgebra::DVector;
 
 use crate::{Interval, IntervalBox, SparsePolyZonotope};
 
@@ -80,7 +81,7 @@ impl SparsePolyZonotope {
                 break;
             }
 
-            let Some(factor) = pieces[worst].set.heaviest_factor(dim) else {
+            let Some(factor) = pieces[worst].set.heaviest_factor(Some(dim)) else {
                 // No factor left that split accepts: this piece's bound stands.
                 break;
             };
@@ -108,57 +109,21 @@ impl SparsePolyZonotope {
     }
 
     /// The larger `sign · x_dim` of two points of the set, a lower bound of the
-    /// true maximum. Both set each `β` to the sign that pushes `sign · x_dim`
-    /// up. One has every `α = 0`; the other sets each `α_k` to the sign of the
-    /// monomials that are odd powers of `α_k` alone, which is the exact
-    /// maximiser for a set that came from a zonotope.
+    /// true maximum. Both take the factor values of
+    /// [`descent_corner`](Self::descent_corner) for `−sign · x_dim`, which push
+    /// `sign · x_dim` up; one then sets every `α` back to zero. The corner is
+    /// the exact maximiser for a set that came from a zonotope.
     ///
     /// Evaluated in plain `f64`, so the bound is not certified.
     fn best_point_value(&self, dim: usize, sign: f64) -> f64 {
-        let up = |x: f64| if sign * x >= 0.0 { 1.0 } else { -1.0 };
-        let beta: Vec<f64> = self
-            .independent_generators()
-            .row(dim)
-            .iter()
-            .map(|&g| up(g))
-            .collect();
-        let (g, e) = (self.dependent_generators(), self.exponents());
-        let corner: Vec<f64> = (0..self.ids().len())
-            .map(|k| {
-                let alone_odd = |j: usize| {
-                    e[(k, j)] % 2 == 1 && (0..e.nrows()).all(|r| r == k || e[(r, j)] == 0)
-                };
-                let pull: f64 = (0..g.ncols())
-                    .filter(|&j| alone_odd(j))
-                    .map(|j| g[(dim, j)])
-                    .sum();
-                if pull == 0.0 { 0.0 } else { up(pull) }
-            })
-            .collect();
-        let center = vec![0.0; self.ids().len()];
+        let direction = DVector::from_fn(self.dim(), |i, _| if i == dim { -sign } else { 0.0 });
+        let (corner, beta) = self.descent_corner(&direction);
+        let center = vec![0.0; corner.len()];
 
         [center, corner]
             .iter()
             .map(|alpha| sign * self.evaluate(alpha, &beta)[dim])
             .fold(f64::NEG_INFINITY, f64::max)
-    }
-
-    /// The factor whose monomials weigh most in dimension `dim`, by
-    /// `Σ_j |G[dim, j]| E[k, j]`; `None` if no monomial depends on a factor
-    /// that [`split`](Self::split) accepts.
-    fn heaviest_factor(&self, dim: usize) -> Option<crate::FactorId> {
-        let (g, e) = (self.dependent_generators(), self.exponents());
-        let weight = |k: usize| -> f64 {
-            (0..g.ncols())
-                .map(|j| g[(dim, j)].abs() * f64::from(e[(k, j)]))
-                .sum()
-        };
-
-        (0..self.ids().len())
-            .map(|k| (k, weight(k)))
-            .filter(|&(k, w)| w > 0.0 && self.can_split(k))
-            .max_by(|a, b| a.1.total_cmp(&b.1))
-            .map(|(k, _)| self.ids()[k])
     }
 }
 
