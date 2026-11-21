@@ -115,8 +115,14 @@ fn step(
 ) -> Option<Step> {
     match LinearReach::new(sys.clone(), r, terms) {
         Ok(reach) => Some(reach.step(x, u)),
-        Err(ReachError::StepTooLarge) => None,
-        Err(ReachError::InvalidStep) => unreachable!("test steps are positive"),
+        Err(e) => {
+            assert_eq!(
+                e,
+                ReachError::StepTooLarge,
+                "test steps are positive, so the only error of LinearReach::new"
+            );
+            None
+        }
     }
 }
 
@@ -160,7 +166,7 @@ proptest! {
         let u = input_set(m, &values);
         // A constant input without spread exposes the input correction F̃ the same way.
         let u = if point_input { Zonotope::new(u.center().clone(), DMatrix::zeros(m, 0)) } else { u };
-        let Some(Step { time_point, time_interval }) = step(&sys, r, terms, &x0, &u) else {
+        let Some(Step { time_point, time_interval, .. }) = step(&sys, r, terms, &x0, &u) else {
             return Ok(());
         };
         let dirs: Vec<DVector<f64>> = directions.iter().map(|d| DVector::from_column_slice(&d[..n])).collect();

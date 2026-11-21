@@ -62,3 +62,8 @@ workspace = true
 [[bench]]
 name = "operations"
 harness = false
+
+# The reachability crate's Monte Carlo and mutation tests take minutes without
+# optimization. opt-level 1 keeps debug assertions and overflow checks on.
+[profile.test]
+opt-level = 1
