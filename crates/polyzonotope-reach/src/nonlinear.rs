@@ -558,7 +558,7 @@ impl<D: Dynamics> NonlinearReach<D> {
         }
 
         let (jacobian, jacobian_radius) = jacobian.center_radius();
-        let offset = model_offset(&flow, &jacobian, &point);
+        let offset = model_offset(&flow, &jacobian, &point)?;
         if !all_finite(offset.iter()) {
             return None;
         }
@@ -642,13 +642,20 @@ fn points(values: impl Iterator<Item = f64>) -> Vec<Interval> {
     values.map(Interval::point).collect()
 }
 
-/// `f(z*) − J z*` row by row in interval arithmetic, `J = [A B]`.
-fn model_offset(flow: &[Interval], jacobian: &DMatrix<f64>, point: &[f64]) -> Vec<Interval> {
+/// `f(z*) − J z*` row by row in interval arithmetic, `J = [A B]`, or `None`
+/// once a product or partial sum overflows: under `sound`, subtracting an
+/// infinite bound panics instead of giving an infinite result.
+fn model_offset(
+    flow: &[Interval],
+    jacobian: &DMatrix<f64>,
+    point: &[f64],
+) -> Option<Vec<Interval>> {
     flow.iter()
         .enumerate()
         .map(|(i, &f)| {
-            point.iter().enumerate().fold(f, |acc, (j, &z)| {
-                acc - Interval::point(jacobian[(i, j)]) * Interval::point(z)
+            point.iter().enumerate().try_fold(f, |acc, (j, &z)| {
+                let term = Interval::point(jacobian[(i, j)]) * Interval::point(z);
+                all_finite([acc, term].iter()).then(|| acc - term)
             })
         })
         .collect()
@@ -686,6 +693,20 @@ fn widen(assumed: &[Interval], actual: &[Interval], enlarge: f64) -> Vec<Interva
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// An overflowing `J z*` gives no offset instead of panicking under `sound`.
+    #[test]
+    fn overflowing_offset_is_refused() {
+        let jacobian = DMatrix::from_row_slice(1, 2, &[1e300, 1.0]);
+        let flow = [Interval::point(1.0)];
+        assert_eq!(model_offset(&flow, &jacobian, &[1e10, 1.0]), None);
+        assert_eq!(
+            model_offset(&flow, &jacobian, &[1.0, 1.0]),
+            Some(vec![
+                Interval::point(1.0) - Interval::point(1e300) - Interval::point(1.0)
+            ])
+        );
+    }
 
     /// Widening covers both boxes and moves out by the relative margin.
     #[test]
