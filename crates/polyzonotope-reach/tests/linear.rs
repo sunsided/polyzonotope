@@ -109,7 +109,26 @@ fn step(
     match LinearReach::new(sys.clone(), r, terms) {
         Ok(reach) => Some(reach.step(x, u)),
         Err(ReachError::StepTooLarge) => None,
+        Err(ReachError::InvalidStep) => unreachable!("test steps are positive"),
     }
+}
+
+/// A negative, infinite or NaN step is refused instead of giving a remainder
+/// bound that is too small or panicking.
+#[test]
+fn invalid_steps_are_refused() {
+    let sys = LinearSystem {
+        a: DMatrix::from_row_slice(2, 2, &[0.0, 1.0, -1.0, 0.0]),
+        b: DMatrix::from_element(2, 1, 1.0),
+    };
+    for r in [-0.1, -f64::MIN_POSITIVE, f64::INFINITY, f64::NAN] {
+        assert_eq!(
+            LinearReach::new(sys.clone(), r, 3).err(),
+            Some(ReachError::InvalidStep),
+            "r = {r}"
+        );
+    }
+    assert!(LinearReach::new(sys, 0.0, 3).is_ok());
 }
 
 proptest! {

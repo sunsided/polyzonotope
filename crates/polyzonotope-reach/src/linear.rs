@@ -49,6 +49,7 @@ impl LinearReach {
     ///
     /// # Errors
     ///
+    /// [`ReachError::InvalidStep`] if `step` is negative, infinite or NaN.
     /// [`ReachError::StepTooLarge`] if the Taylor remainder bound does not
     /// hold for this step and term count.
     ///

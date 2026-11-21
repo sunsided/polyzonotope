@@ -26,9 +26,14 @@ impl Taylor {
     ///
     /// # Errors
     ///
+    /// [`ReachError::InvalidStep`] unless `r` is finite and non-negative: a
+    /// negative `r` makes `ε` negative and the remainder bound too small.
     /// [`ReachError::StepTooLarge`] if `ε >= 1`, where the remainder bound
     /// does not hold; use a smaller step or more terms.
     pub(crate) fn new(a: &DMatrix<f64>, step: f64, terms: usize) -> Result<Self, ReachError> {
+        if !(step.is_finite() && step >= 0.0) {
+            return Err(ReachError::InvalidStep);
+        }
         let n = a.nrows();
         let mut powers = vec![IntervalMatrix::point(&DMatrix::identity(n, n))];
         let a_iv = IntervalMatrix::point(a);
