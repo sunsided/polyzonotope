@@ -909,10 +909,20 @@ fn pow_by_squaring(mut x: f64, mut n: u32) -> f64 {
 }
 
 impl SparsePolyZonotope {
-    /// Whether [`split`](Self::split) accepts the factor in row `k`: none of
-    /// its exponents is above [`MAX_SPLIT_EXPONENT`]. Branch and bound skips
-    /// the others instead of panicking.
-    pub(crate) fn can_split(&self, k: usize) -> bool {
+    /// Whether [`split`](Self::split) accepts `factor`: it is one of
+    /// [`ids`](Self::ids), and none of its exponents is above the limit of
+    /// `split`. Callers that pick factors to split can skip the others
+    /// instead of panicking.
+    #[must_use]
+    pub fn can_split(&self, factor: FactorId) -> bool {
+        self.id
+            .iter()
+            .position(|&x| x == factor)
+            .is_some_and(|k| self.can_split_row(k))
+    }
+
+    /// [`can_split`](Self::can_split) for the factor in row `k`.
+    pub(crate) fn can_split_row(&self, k: usize) -> bool {
         self.e.row(k).iter().all(|&d| d <= MAX_SPLIT_EXPONENT)
     }
 }

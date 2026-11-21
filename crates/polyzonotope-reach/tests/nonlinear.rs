@@ -699,6 +699,20 @@ fn easy_steps_grow() {
     check_trajectories(van_der_pol_f64, &flowpipe, (&center, radius, u), 24);
 }
 
+/// Ten steps of 0.1 add up to 0.9999999999999999; the last one stretches
+/// to the horizon instead of leaving an eleventh step of 1e-16.
+#[test]
+fn horizon_takes_no_rounding_step() {
+    let decay = Polynomial::autonomous(1).term(0, -1.0, &[1]);
+    let no_input = Zonotope::new(DVector::zeros(0), DMatrix::zeros(0, 0));
+    let flowpipe = NonlinearReach::new(decay, NonlinearSettings::new(0.1))
+        .reach_for(&initial_box(&[1.0], 0.1), &no_input, 1.0)
+        .expect("a linear decay converges");
+    assert_eq!(flowpipe.len(), 10);
+    let total: f64 = flowpipe.iter().map(|p| p[0].duration).sum();
+    assert!((total - 1.0).abs() < 1e-15, "{total}");
+}
+
 /// Dynamics without third derivatives are refused by polynomialization at
 /// once, without spending pieces on splits, and still work with
 /// linearization.

@@ -26,6 +26,24 @@ use crate::{Dynamics, IntervalTensor, LinearSystem, ReachError};
 /// `sound` would panic instead of giving an infinite bound.
 const TAME: f64 = 1e30;
 
+/// Most generators the start set keeps for its cubic map, which has one
+/// column per triple of generators: 40 keep it near 12 000 columns up to 40
+/// states, where order 20 in six states made 300 000 and a gigabyte. Above
+/// 40 states the order stays at 1, so the set keeps `n` generators and the
+/// map grows as `C(n + 3, 3)` again. Two states keep order 20. The cubic term is `O(w³)` in the width `w`, so
+/// its share of the set is small and a coarser set loses little.
+const CUBIC_GENERATORS: u32 = 40;
+
+/// The order for at most [`CUBIC_GENERATORS`] generators in `n` dimensions,
+/// at most `order` and at least 1.
+#[expect(
+    clippy::cast_precision_loss,
+    reason = "state counts stay far below 2^52"
+)]
+fn cubic_order(order: f64, n: usize) -> f64 {
+    (f64::from(CUBIC_GENERATORS) / n as f64).clamp(1.0, order.max(1.0))
+}
+
 /// The part of the abstraction error that is computed once per step, at the
 /// start set `X`.
 pub(super) struct Expansion {
@@ -96,7 +114,11 @@ pub(super) fn static_error<D: Dynamics>(
         .unzip();
     let mut polynomial = shifted.quadratic_map(&quadratic);
     if terms.has(Term::CubicStatic) {
-        polynomial = polynomial.exact_plus(&shifted.cubic_map(&state_slices(&sixth, n)));
+        // Sound: the reduced set keeps the kept factors, and the dropped part
+        // moves into independent generators, which the static set does not
+        // share with `x` anyway.
+        let coarse = shifted.reduce(cubic_order(order, n), Reduction::Girard);
+        polynomial = polynomial.exact_plus(&coarse.cubic_map(&state_slices(&sixth, n)));
     }
     let static_set = cap_degree(&polynomial, max_degree).reduce(order, Reduction::Girard);
     let mut start = hull.0;

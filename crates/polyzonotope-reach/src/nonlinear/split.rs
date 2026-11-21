@@ -58,7 +58,7 @@ pub(super) fn halves(
     let candidates = core::iter::once(&lifted)
         .chain(oriented.as_ref())
         .flat_map(|set| set.ids().iter().map(move |&id| (set, id)))
-        .filter(|&(set, id)| splittable(set, id));
+        .filter(|&(set, id)| set.can_split(id));
     let best = candidates
         .map(|(set, id)| {
             let (lower, upper) = set.split(id);
@@ -121,18 +121,6 @@ pub(super) fn lift_independent(pz: &SparsePolyZonotope) -> SparsePolyZonotope {
         ids,
     )
     .expect("lifted shapes fit")
-}
-
-/// Whether [`SparsePolyZonotope::split`] can take `factor`: its exponents
-/// stay at most 56, where the binomial coefficients are exact.
-fn splittable(pz: &SparsePolyZonotope, factor: FactorId) -> bool {
-    let k = pz
-        .ids()
-        .iter()
-        .position(|&id| id == factor)
-        .expect("factor of this set");
-
-    pz.exponents().row(k).iter().all(|&e| e <= 56)
 }
 
 /// The sum of the widths of the interval hull: the size measure of both
