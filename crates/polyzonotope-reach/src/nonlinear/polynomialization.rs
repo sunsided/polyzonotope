@@ -111,20 +111,65 @@ pub(super) fn static_error<D: Dynamics>(
     })
 }
 
-/// `x' = A x + v + I e`, `v' = 0`: the linear model with the static error as
-/// a constant input `v` in the lower `n` states, and the varying input `e`
-/// (`B u + w + ψ_d`) on the upper ones.
+/// `x' = A x + v + I e`, `v' = 0`, `x₀' = 0`: the linear model with the
+/// static error as a constant input `v` in the middle `n` states, the start
+/// state `x₀ = x_k` kept in the last `n`, and the varying input `e`
+/// (`B u + w + ψ_d`) on the first ones. The copy of the start state lets
+/// [`drift`] read `x(t) − x_k` off the time-interval set.
 pub(super) fn augmented_system(a: &DMatrix<f64>) -> LinearSystem {
     let n = a.nrows();
-    let mut big = DMatrix::zeros(2 * n, 2 * n);
+    let mut big = DMatrix::zeros(3 * n, 3 * n);
     big.view_mut((0, 0), (n, n)).copy_from(a);
     big.view_mut((0, n), (n, n))
         .copy_from(&DMatrix::identity(n, n));
 
     LinearSystem {
         a: big,
-        b: DMatrix::identity(2 * n, n),
+        b: DMatrix::identity(3 * n, n),
     }
+}
+
+/// The start of the augmented system: `{ (x_k, ψ_s, x_k) }` over the start
+/// set `x` and the static set. Both copies of `x_k` come from one linear
+/// map, so they share every factor and every independent generator, and
+/// the static set joins through `exact_plus`, which keeps its factors
+/// shared with `x`.
+pub(super) fn augmented_start(
+    x: &SparsePolyZonotope,
+    static_set: &SparsePolyZonotope,
+) -> SparsePolyZonotope {
+    let n = x.dim();
+    let mut twice = DMatrix::zeros(3 * n, n);
+    twice
+        .view_mut((0, 0), (n, n))
+        .copy_from(&DMatrix::identity(n, n));
+    twice
+        .view_mut((2 * n, 0), (n, n))
+        .copy_from(&DMatrix::identity(n, n));
+    let mut middle = DMatrix::zeros(3 * n, n);
+    middle
+        .view_mut((n, 0), (n, n))
+        .copy_from(&DMatrix::identity(n, n));
+
+    x.linear_map(&twice)
+        .exact_plus(&static_set.linear_map(&middle))
+}
+
+/// The interval hull of `x(t) − x_k` over an augmented set: its first `n`
+/// rows minus its last `n`. On the time-interval set it bounds the motion
+/// of every trajectory during the step, under the hypothesis that the
+/// abstraction error stays in the guess, the same one the time-interval
+/// set itself rests on. The shared factors of both copies cancel.
+pub(super) fn drift(set: &SparsePolyZonotope, n: usize) -> Vec<Interval> {
+    let mut difference = DMatrix::zeros(n, set.dim());
+    difference
+        .view_mut((0, 0), (n, n))
+        .copy_from(&DMatrix::identity(n, n));
+    difference
+        .view_mut((0, 2 * n), (n, n))
+        .copy_from(&-DMatrix::identity(n, n));
+
+    set.linear_map(&difference).interval_hull().0
 }
 
 /// The first `n` rows of `set`: the state part of an augmented set.
@@ -145,11 +190,11 @@ pub(super) fn project(set: &SparsePolyZonotope, n: usize) -> SparsePolyZonotope 
 pub(super) fn dynamic_error<D: Dynamics>(
     dynamics: &D,
     (model, expansion): (&Linearization, &Expansion),
-    (states, u): (&SparsePolyZonotope, &Zonotope),
+    (states, drift, u): (&SparsePolyZonotope, &[Interval], &Zonotope),
     step: f64,
     terms: Terms,
 ) -> Result<Vec<Interval>, ReachError> {
-    let boxes = Boxes::new(dynamics, model, expansion, (states, u), step)?;
+    let boxes = Boxes::new(dynamics, model, expansion, (states, drift, u), step)?;
     let mut deviation = boxes.deviation.clone();
     if !terms.has(Term::InputDeviation) {
         deviation[states.dim()..].fill(Interval::point(0.0));
@@ -198,13 +243,15 @@ pub(super) fn dynamic_error<D: Dynamics>(
 struct Boxes {
     /// `□Δz`: the hull of `R(τ) × U` minus `z*`.
     full: Vec<Interval>,
-    /// `□δ`: `[0, r] · f(□R(τ) × □U) − (x* − x_m)` for the states,
+    /// `□δ`: `x(t) − x_k − (x* − x_m)` for the states, with `x(t) − x_k`
+    /// in both `[0, r] · f(□R(τ) × □U)` and the drift of the linear model;
     /// `□U − u*` for the inputs.
     deviation: Vec<Interval>,
 }
 
 impl Boxes {
-    /// The boxes for the time-interval set `states` and the inputs `u`.
+    /// The boxes for the time-interval set `states`, its drift `x(t) − x_k`
+    /// and the inputs `u`.
     ///
     /// # Errors
     ///
@@ -214,7 +261,7 @@ impl Boxes {
         dynamics: &D,
         model: &Linearization,
         expansion: &Expansion,
-        (states, u): (&SparsePolyZonotope, &Zonotope),
+        (states, drift, u): (&SparsePolyZonotope, &[Interval], &Zonotope),
         step: f64,
     ) -> Result<Self, ReachError> {
         let n = states.dim();
@@ -234,11 +281,16 @@ impl Boxes {
         }
 
         let duration = Interval::new(0.0, step);
+        if !tame(drift.iter()) {
+            return Err(ReachError::AbstractionDiverged);
+        }
+
         let deviation = flow
             .iter()
+            .zip(drift)
             .zip(model.point.iter().zip(&model.middle))
-            .map(|(&f, (&star, &middle))| {
-                duration * f - (Interval::point(star) - Interval::point(middle))
+            .map(|((&f, &d), (&star, &middle))| {
+                intersect(duration * f, d) - (Interval::point(star) - Interval::point(middle))
             })
             .chain(full[n..].iter().copied())
             .collect();
@@ -428,6 +480,14 @@ fn square(iv: Interval) -> Interval {
     Interval::new(p.lo.max(0.0), p.hi)
 }
 
+/// The intersection of two enclosures of one quantity, both sound, so the
+/// intersection is sound too and never empty in exact arithmetic. If
+/// rounding makes them miss each other, the first one is kept.
+fn intersect(a: Interval, b: Interval) -> Interval {
+    let (lo, hi) = (a.lo.max(b.lo), a.hi.min(b.hi));
+    if lo <= hi { Interval::new(lo, hi) } else { a }
+}
+
 /// `[−r, r]`.
 fn symmetric(r: f64) -> Interval {
     Interval::new(-r, r)
@@ -539,22 +599,44 @@ mod tests {
         }
     }
 
-    /// The augmented system feeds `v` into `x` and keeps it constant.
+    /// The augmented system feeds `v` into `x` and keeps `v` and the copy
+    /// of the start state constant.
     #[test]
     fn augmentation_layout() {
         let a = DMatrix::from_row_slice(2, 2, &[1.0, 2.0, 3.0, 4.0]);
         let system = augmented_system(&a);
-        let expected = DMatrix::from_row_slice(
-            4,
-            4,
-            &[
-                1.0, 2.0, 1.0, 0.0, //
-                3.0, 4.0, 0.0, 1.0, //
-                0.0, 0.0, 0.0, 0.0, //
-                0.0, 0.0, 0.0, 0.0,
-            ],
-        );
+        let mut expected = DMatrix::zeros(6, 6);
+        expected
+            .view_mut((0, 0), (2, 4))
+            .copy_from(&DMatrix::from_row_slice(
+                2,
+                4,
+                &[1.0, 2.0, 1.0, 0.0, 3.0, 4.0, 0.0, 1.0],
+            ));
         assert_eq!(system.a, expected);
-        assert_eq!(system.b, DMatrix::identity(4, 2));
+        assert_eq!(system.b, DMatrix::identity(6, 2));
+    }
+
+    /// Both copies of the start state share their generators, so the drift
+    /// of the augmented start is zero, independent generators included.
+    #[test]
+    fn start_copies_cancel() {
+        let x = SparsePolyZonotope::new(
+            DVector::from_column_slice(&[1.0, 2.0]),
+            DMatrix::from_row_slice(2, 1, &[0.5, 0.25]),
+            DMatrix::from_row_slice(2, 1, &[0.1, -0.2]),
+            DMatrix::from_row_slice(1, 1, &[2]),
+            polyzonotope::FactorId::fresh_n(1),
+        )
+        .unwrap();
+        let static_set = SparsePolyZonotope::from_zonotope(&Zonotope::new(
+            DVector::from_column_slice(&[3.0, 4.0]),
+            DMatrix::identity(2, 2),
+        ));
+        let start = augmented_start(&x, &static_set);
+        assert_eq!(project(&start, 2).interval_hull(), x.interval_hull());
+        for d in drift(&start, 2) {
+            assert!(d.lo.abs() < 1e-15 && d.hi.abs() < 1e-15, "{d:?}");
+        }
     }
 }

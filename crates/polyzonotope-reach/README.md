@@ -61,14 +61,14 @@ Sets grow by a few generators per step. Call `reduce` from `polyzonotope` betwee
 
 `Method::Polynomialization` (Althoff 2013) keeps the second- and third-order error at the start set as a polynomial zonotope over the set's factors. It needs `Dynamics::third_derivatives`, and refuses with `ReachError::MissingDerivatives` without them. With `s = (x_k − x_m, 0)` the start of a trajectory relative to the middle `x_m` of the set, and `δ(t) = Δz(t) − s` what changes during the step, the error splits exactly into:
 
-- the static part `sᵀ Q s + P s³` with `Q = ½ H(z*)` and `P ≈ ⅙ ∂³f(z*)`. It depends on `x_k` alone, so it is computed once per step with `quadratic_map` and `cubic_map` over the factors of `X`. It enters as the constant input `v` of the augmented system `x' = A x + v, v' = 0`, started from `X × Ψ_s`, and keeps its dependencies.
-- the dynamic part: `sᵀ (½H) δ + δᵀ (½H) s + δᵀ (½H) δ`, the change `P (Δz³ − s³)` of the cubic term during the step, the Lagrange remainder `⅙ Σ (∂³f(ξ) − 6P) Δz Δz Δz` over a box that holds every segment from `z*`, and the rounding spreads of `J(z*)` and `H(z*)`. For a field of degree 3 or less, `∂³f` is constant and that remainder comes from rounding only. All of it goes through interval arithmetic and into the guessed box `Ψ̄`. The state part of `δ` comes from the flow, `[0, r] f(□R(τ) × □U)` minus the half step.
+- the static part `sᵀ Q s + P s³` with `Q = ½ H(z*)` and `P ≈ ⅙ ∂³f(z*)`. It depends on `x_k` alone, so it is computed once per step with `quadratic_map` and `cubic_map` over the factors of `X`. It enters as the constant input `v` of the augmented system `x' = A x + v, v' = 0, x₀' = 0`, started from `{ (x_k, ψ_s(x_k), x_k) }`, and keeps its dependencies.
+- the dynamic part: `sᵀ (½H) δ + δᵀ (½H) s + δᵀ (½H) δ`, the change `P (Δz³ − s³)` of the cubic term during the step, the Lagrange remainder `⅙ Σ (∂³f(ξ) − 6P) Δz Δz Δz` over a box that holds every segment from `z*`, and the rounding spreads of `J(z*)` and `H(z*)`. For a field of degree 3 or less, `∂³f` is constant and that remainder comes from rounding only. All of it goes through interval arithmetic and into the guessed box `Ψ̄`. The state part of `δ` is `x(t) − x_k` minus the half step, with `x(t) − x_k` in both the flow box `[0, r] f(□R(τ) × □U)` and the hull of `x − x₀` over the time-interval set of the augmented system, which carries a constant copy `x₀ = x_k` of the start state. In that difference the factors of `X` cancel, so it does not grow with the set the way the flow box does.
 
 The inputs are never static, since `u(t)` may jump inside `U` during the step: every term with `u − u*` is dynamic. The static error triples the degree of the set with each step, so monomials above `max_degree` (default 4) are enclosed as independent generators. The rustdoc of `Method::Polynomialization` has the full soundness argument.
 
 ### Keeping dependencies through reduction
 
-The linear step and the order reduction make generators independent: the error box, the time-interval hull, and every dependent monomial that reduction encloses. In the next step's quadratic map, products of independent generators are enclosed one by one, so a wide set loses its shape step by step. With `Restructure::Lift`, every independent generator of the time-point set becomes a dependent factor of its own after the Girard reduction. That is exact, and later quadratic maps then treat those factors as polynomials. Where nothing merges, it costs 1.5 to 1.7 times as much (40 steps of Van der Pol from `ρ = 0.5`), and gains little since the time-interval hull pairs the independent generators of `X` with their images: on Van der Pol from `ρ = 0.5`, polynomialization ends 6% narrower with lifting, and on the damped cubic of the tests 15% wider, with 6 pieces either way. Lifted pieces merge more readily, though: on the damped cubic they merge back to 3 and the run is 17% faster. So the default is `Restructure::Off`, which keeps the generators independent.
+The linear step and the order reduction make generators independent: the error box, the time-interval hull, and every dependent monomial that reduction encloses. In the next step's quadratic map, products of independent generators are enclosed one by one, so a wide set loses its shape step by step. With `Restructure::Lift`, every independent generator of the time-point set becomes a dependent factor of its own after the Girard reduction. That is exact, and later quadratic maps then treat those factors as polynomials. Where nothing merges, it costs 1.5 to 1.7 times as much (40 steps of Van der Pol from `ρ = 0.5`), and gains little since the time-interval hull pairs the independent generators of `X` with their images: on Van der Pol from `ρ = 0.5`, polynomialization ends 3% narrower with lifting, and on the damped cubic of the tests 31% wider, with 6 pieces either way. Lifted pieces merge more readily, though: on the damped cubic they merge back to 3 and the run is a third faster. So the default is `Restructure::Off`, which keeps the generators independent.
 
 ### Adaptive steps
 
@@ -82,18 +82,18 @@ From `[1.4, 2.4] ± ρ` over 0.8 s, with 12 Taylor terms, order 20 and up to 8 p
 
 | `ρ` | setting | linearization: proven, width at 0.16 s | polynomialization: proven, width at 0.16 s / 0.4 s / 0.8 s |
 |-----|---------|-----------------------------|-----------------------------------------|
-| 0.5 | `Off`, step 0.02 | 0.8 s, 3.51 | 0.8 s, 3.32 / 3.61 / 3.42 |
-| 0.5 | `Lift`, step 0.02 | 0.8 s, 3.51 | 0.8 s, 3.32 / 3.56 / 3.22 |
-| 0.5 | `Lift`, step 0.01 | 0.8 s, 3.44 | 0.8 s, 3.16 / 3.08 / 2.13 |
+| 0.5 | `Off`, step 0.02 | 0.8 s, 3.51 | 0.8 s, 3.24 / 3.24 / 2.45 |
+| 0.5 | `Lift`, step 0.02 | 0.8 s, 3.51 | 0.8 s, 3.24 / 3.21 / 2.37 |
+| 0.5 | `Off`, step 0.01 | 0.8 s, 3.44 | 0.8 s, 3.13 / 2.94 / 1.84 |
 | 0.5 | true | | 2.74 / 2.30 / 1.09 |
-| 1 | `Off`, step 0.02 | 0.26 s, 13.9 | 0.44 s, 8.72 / 44.4 / — |
-| 1 | `Lift`, step 0.02 | 0.26 s, 13.9 | 0.44 s, 8.62 / 33.8 / — |
-| 1 | `Lift`, step 0.02, adaptive down to 0.001 | 0.29 s, 13.9 | 0.49 s, 8.62 / 33.8 / — |
-| 1 | `Lift`, step 0.01 | 0.33 s, 11.3 | 0.61 s, 7.63 / 13.1 / — |
-| 1 | `Lift`, step 0.01, adaptive down to 0.001 | 0.33 s, 11.3 | 0.64 s, 7.63 / 13.1 / — |
+| 1 | `Off`, step 0.02 | 0.26 s, 13.9 | 0.50 s, 8.13 / 20.5 / — |
+| 1 | `Lift`, step 0.02 | 0.26 s, 13.9 | 0.52 s, 8.06 / 16.8 / — |
+| 1 | `Off`, step 0.02, adaptive down to 0.001 | 0.29 s, 13.9 | 0.53 s, 8.13 / 20.5 / — |
+| 1 | `Off`, step 0.01 | 0.33 s, 11.3 | 0.67 s, 7.36 / 10.8 / — |
+| 1 | `Off`, step 0.01, adaptive down to 0.001 | 0.33 s, 11.3 | 0.68 s, 7.36 / 10.8 / — |
 | 1 | true | | 5.34 / 4.66 / 2.47 |
 
-From `ρ = 1`, neither method gets far: the error box of a set that wide feeds on itself. Shorter steps push the failure out from 0.44 s to 0.64 s with polynomialization, and from 0.26 s to 0.33 s with linearization; the width at 0.16 s is 7.63 against a true 5.34. From `ρ = 0.5` with step 0.01, polynomialization's set shrinks after 0.4 s, as the true set does, though at twice its width. From `ρ = 0.2` the two methods end within 4% of each other.
+From `ρ = 1`, neither method gets far: the error box of a set that wide feeds on itself. Shorter steps push the failure out from 0.50 s to 0.68 s with polynomialization, and from 0.26 s to 0.33 s with linearization; the width at 0.16 s is 7.36 against a true 5.34. From `ρ = 0.5` with step 0.01, polynomialization's set shrinks after 0.4 s, as the true set does, though at 1.7 times its width. From `ρ = 0.2` the two methods end within 9% of each other.
 
 ### Splitting and merging
 
@@ -149,7 +149,7 @@ In-crate mutation tests drop one error term at a time, each in a scenario built 
 
 ## Roadmap
 
-1. A tighter dynamic error for wide sets. From `ρ = 1`, Van der Pol fails because the error box feeds on itself.
+1. A tighter dynamic error for wide sets. From `ρ = 1`, Van der Pol still fails after 0.5 s: the cross term `sᵀ (½H) δ` multiplies the boxes of `s` and `δ` and dominates the error box there.
 2. A cross-check of the nonlinear reachable sets against CORA. Its generator needs MATLAB, because CORA's symbolic derivatives do not run under Octave.
 
 ## License
