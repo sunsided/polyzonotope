@@ -27,9 +27,10 @@ use crate::{Dynamics, IntervalTensor, LinearSystem, ReachError};
 const TAME: f64 = 1e30;
 
 /// Most generators the start set keeps for its cubic map, which has one
-/// column per triple of generators: 40 keep it near 12 000 columns at any
-/// dimension, where order 20 in six states made 300 000 and a gigabyte.
-/// Two states keep order 20. The cubic term is `O(w³)` in the width `w`, so
+/// column per triple of generators: 40 keep it near 12 000 columns up to 40
+/// states, where order 20 in six states made 300 000 and a gigabyte. Above
+/// 40 states the order stays at 1, so the set keeps `n` generators and the
+/// map grows as `C(n + 3, 3)` again. Two states keep order 20. The cubic term is `O(w³)` in the width `w`, so
 /// its share of the set is small and a coarser set loses little.
 const CUBIC_GENERATORS: u32 = 40;
 
