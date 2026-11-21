@@ -57,8 +57,8 @@ pub enum Method {
     /// the set's factors and moves with the set; only what changes during
     /// the step and the Lagrange remainder around the third derivatives at
     /// `z*` go into the box. Needs [`Dynamics::third_derivatives`]. Tighter
-    /// for large sets, since the box shrinks from `O(w²)` to `O(w r)` plus
-    /// the spread of `∂³f` times `w³` for a set of width `w`; that spread
+    /// for large sets, since the box shrinks from `O(w²)` to `O(w r + w² r)`
+    /// plus the spread of `∂³f` times `w³` for a set of width `w`; that spread
     /// comes from rounding only for fields of degree 3 or less.
     ///
     /// # The error decomposition
@@ -623,7 +623,7 @@ pub(crate) enum Term {
     Cross,
     /// Polynomialization: `δᵀ (½H) δ`.
     DynamicQuadratic,
-    /// Polynomialization: the cubic form `⅙ T_c s³` in the static set.
+    /// Polynomialization: the cubic form `P s³` in the static set.
     CubicStatic,
     /// Polynomialization: `⅙ T_c (Δz³ − s³)`, the change of the cubic term
     /// at `z*` during the step.

@@ -351,6 +351,57 @@ fn zero_iterations_are_rejected() {
     let _ = NonlinearReach::new(van_der_pol(), settings);
 }
 
+/// Dynamics whose third derivatives are unbounded at every point, as
+/// `Polynomial` reports an overflowing term, while the flow and the lower
+/// derivatives stay finite.
+struct UnboundedThird;
+
+impl Dynamics for UnboundedThird {
+    fn states(&self) -> usize {
+        1
+    }
+
+    fn inputs(&self) -> usize {
+        0
+    }
+
+    fn flow(&self, z: &[Interval]) -> Vec<Interval> {
+        vec![-z[0]]
+    }
+
+    fn jacobian(&self, _: &[Interval]) -> IntervalMatrix {
+        IntervalMatrix(DMatrix::from_element(1, 1, Interval::point(-1.0)))
+    }
+
+    fn hessians(&self, _: &[Interval]) -> Vec<IntervalMatrix> {
+        vec![IntervalMatrix::zeros(1, 1)]
+    }
+
+    fn third_derivatives(&self, _: &[Interval]) -> Option<Vec<IntervalTensor>> {
+        let mut t = IntervalTensor::zeros(1);
+        t[(0, 0, 0)] = Interval::new(f64::NEG_INFINITY, f64::INFINITY);
+        Some(vec![t])
+    }
+}
+
+/// Unbounded third derivatives at the linearization point refuse the
+/// polynomialization step instead of panicking on their NaN midpoint.
+#[test]
+fn unbounded_third_derivatives_are_refused() {
+    let reach = NonlinearReach::new(
+        UnboundedThird,
+        NonlinearSettings {
+            method: Method::Polynomialization,
+            ..NonlinearSettings::new(0.05)
+        },
+    );
+    let start = initial_box(&[1.0], 0.1);
+    assert_eq!(
+        reach.step_autonomous(&start).err(),
+        Some(ReachError::AbstractionDiverged)
+    );
+}
+
 /// A degree-9 field that overflows `f64` during the error check is
 /// refused, not a panic, even under `sound`.
 fn overflow_is_refused(method: Method) {
