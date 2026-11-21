@@ -62,12 +62,15 @@ pub(super) fn static_error<D: Dynamics>(
     terms: Terms,
 ) -> Result<Expansion, ReachError> {
     let at = points(model.point.iter().copied());
-    let sixth: Vec<IntervalTensor> = dynamics
+    let third = dynamics
         .third_derivatives(&at)
-        .ok_or(ReachError::MissingDerivatives)?
-        .iter()
-        .map(sixth_of_center)
-        .collect();
+        .ok_or(ReachError::MissingDerivatives)?;
+    // Before the midpoints: an unbounded entry has a NaN midpoint, which
+    // Interval::point rejects with a panic.
+    if !third.iter().all(|t| tame(tensor_entries(t))) {
+        return Err(ReachError::AbstractionDiverged);
+    }
+    let sixth: Vec<IntervalTensor> = third.iter().map(sixth_of_center).collect();
     let cubic: Vec<IntervalTensor> = sixth.iter().map(times_six).collect();
 
     let n = x.dim();
@@ -78,9 +81,7 @@ pub(super) fn static_error<D: Dynamics>(
         .iter()
         .map(|h| h.scale(Interval::point(0.5)))
         .collect();
-    let tame = tame(hull.0.iter())
-        && half_hessians.iter().all(|h| tame(h.0.iter()))
-        && cubic.iter().all(|t| tame(tensor_entries(t)));
+    let tame = tame(hull.0.iter()) && half_hessians.iter().all(|h| tame(h.0.iter()));
     if !tame {
         return Err(ReachError::AbstractionDiverged);
     }
