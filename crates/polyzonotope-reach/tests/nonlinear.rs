@@ -513,7 +513,7 @@ fn bilinear_input_is_contained(method: Method) {
 /// still contains every sampled trajectory.
 #[test]
 fn polynomialization_carries_a_large_set() {
-    let (center, radius, r, steps) = ([1.4, 2.4], 1.4, 0.02, 9);
+    let (center, radius, r, steps) = ([1.4, 2.4], 1.0, 0.02, 18);
     let start = initial_box(&center, radius);
     let settings = |method| NonlinearSettings {
         max_pieces: 1,
