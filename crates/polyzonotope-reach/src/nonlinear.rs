@@ -52,12 +52,14 @@ pub enum Method {
     /// because every [`Dynamics`] supports it.
     #[default]
     Linearization,
-    /// Conservative polynomialization (Althoff 2013): the second-order error
-    /// at the start set stays a polynomial zonotope over the set's factors
-    /// and moves with the set; only what changes during the step and a
-    /// third-order Lagrange remainder go into the box. Needs
-    /// [`Dynamics::third_derivatives`]. Tighter for large sets, since the box
-    /// shrinks from `O(w²)` to `O(w r + w³)` for a set of width `w`.
+    /// Conservative polynomialization (Althoff 2013): the second- and
+    /// third-order error at the start set stays a polynomial zonotope over
+    /// the set's factors and moves with the set; only what changes during
+    /// the step and the Lagrange remainder around the third derivatives at
+    /// `z*` go into the box. Needs [`Dynamics::third_derivatives`]. Tighter
+    /// for large sets, since the box shrinks from `O(w²)` to `O(w r)` plus
+    /// the spread of `∂³f` times `w³` for a set of width `w`; that spread
+    /// comes from rounding only for fields of degree 3 or less.
     ///
     /// # The error decomposition
     ///
@@ -86,15 +88,28 @@ pub enum Method {
     /// f(z) = f(z*) + J(z*) Δz + ½ Δzᵀ H(z*) Δz + ⅙ Σ_{abc} ∂³f(ξ)_{abc} Δz_a Δz_b Δz_c.
     /// ```
     ///
-    /// With `½ H(z*) ∈ Q ± R_Q` and `J(z*) ∈ [A B] ± R_J`, the error of the
-    /// linear model, `e = f(z) − (A x + B u + w)`, splits into
+    /// With `½ H(z*) ∈ Q ± R_Q`, `J(z*) ∈ [A B] ± R_J` and a point tensor
+    /// `P ≈ ⅙ ∂³f(z*)` (the midpoints, divided by 6 and rounded), write
+    /// `T_c` for an enclosure of `6 P` and
+    ///
+    /// ```text
+    /// ⅙ T(ξ) Δz³ = P s³ + ⅙ T_c (Δz³ − s³) + ⅙ (T(ξ) − T_c) Δz³,
+    /// ```
+    ///
+    /// exact for the real `6 P ∈ T_c`. The error of the linear model,
+    /// `e = f(z) − (A x + B u + w)`, then splits into
     ///
     /// ```text
     /// e = ψ_s(x_k) + ψ_d(t),
-    /// ψ_s(x_k) = sᵀ Q s                                          (static)
+    /// ψ_s(x_k) = sᵀ Q s + P s³                                   (static)
     /// ψ_d(t)  ∈ sᵀ [±R_Q] s + sᵀ (½H) δ + δᵀ (½H) s + δᵀ (½H) δ  (dynamic)
-    ///           + ⅙ Σ T(ξ) Δz Δz Δz + [±R_J] |Δz|.
+    ///           + ⅙ T_c (Δz³ − s³) + ⅙ (T(ξ) − T_c) Δz³ + [±R_J] |Δz|.
     /// ```
+    ///
+    /// The change of the cubic term is bounded through the telescoping
+    /// identity `Δz_a Δz_b Δz_c − s_a s_b s_c = δ_a Δz_b Δz_c + s_a δ_b Δz_c +
+    /// s_a s_b δ_c`, so it is `O(w² r)` instead of the `O(w³)` of the whole
+    /// cube over `□Δz`.
     ///
     /// The inputs are never part of `s`: `u(t)` may jump anywhere in `U` during
     /// the step, so only the state at `t_k` is constant along a trajectory.
@@ -103,9 +118,10 @@ pub enum Method {
     /// # Why the sets enclose every trajectory
     ///
     /// The static part is a polynomial of `x_k` alone. The step computes
-    /// `Ψ_s = { sᵀ Q s | x_k ∈ X }` with the quadratic map of the polynomial
-    /// zonotope `X − x_m`, which keeps the factors of `X`: the point of `Ψ_s` that
-    /// belongs to `x_k = X(α, β)` uses the same `α`. Degrees above the cap are
+    /// `Ψ_s = { sᵀ Q s + P s³ | x_k ∈ X }` with the quadratic and the cubic
+    /// map of the polynomial zonotope `X − x_m`, joined by `exact_plus`, which
+    /// keeps the factors of `X`: the point of `Ψ_s` that belongs to
+    /// `x_k = X(α, β)` uses the same `α`. Degrees above the cap are
     /// enclosed as independent generators, which only adds points.
     ///
     /// The static error acts on the trajectory as a constant input `v = ψ_s(x_k)`.
@@ -174,20 +190,16 @@ pub enum Restructure {
     /// exact (`g β` with `β ∈ [-1, 1]` is the monomial `g α` of a factor
     /// nowhere else), and from then on the quadratic maps of later steps
     /// treat it as a polynomial: `α²` stays non-negative and products
-    /// cancel. The default: on Van der Pol from radius 1 it proves 20
-    /// steps with polynomialization instead of 15, and 13 with
-    /// linearization instead of 8, at 2 to 3 times the cost per step. The
+    /// cancel. The default: on Van der Pol from radius 1 it proves 22
+    /// steps with polynomialization instead of 18, and 13 with
+    /// linearization instead of 11, at 2 to 3 times the cost per step. The
     /// number of factors stays at most the number of generators, since
     /// [`compact`](polyzonotope::SparsePolyZonotope::compact) drops the
     /// unused ones.
     ///
-    /// Lifted pieces split less well: after a step the lifted factors
-    /// appear in many monomials, so no single cut halves the bulk. Systems
-    /// that split a lot need roughly twice the
-    /// [`max_pieces`](NonlinearSettings::max_pieces) they need without
-    /// lifting. On the damped cubic `x₀' = −x₀ − x₀³` from radius 1,
-    /// polynomialization needs 12 pieces where it needs 6 without; with 32
-    /// it ends 17% narrower than without lifting.
+    /// On the damped cubic `x₀' = −x₀ − x₀³` from radius 1,
+    /// polynomialization with lifting needs 6 pieces where it needs 10
+    /// without, and ends 40 steps at a third of the width.
     #[default]
     Lift,
 }
@@ -443,7 +455,8 @@ impl<D: Dynamics> NonlinearReach<D> {
     ) -> Result<(Step, usize), ReachError> {
         let n = self.dynamics.states();
         let limits = (self.settings.max_degree, self.settings.order);
-        let expansion = polynomialization::static_error(&self.dynamics, model, x, limits)?;
+        let expansion =
+            polynomialization::static_error(&self.dynamics, model, x, limits, attempt.terms)?;
         let start = if attempt.terms.has(Term::StaticSet) {
             x.cartesian_product(&expansion.static_set)
         } else {
@@ -597,7 +610,7 @@ pub(crate) enum Term {
     HessianSpread,
     /// Both: the spread of the Jacobian at `z*`, from rounding only.
     JacobianSpread,
-    /// Polynomialization: the static polynomial `Ψ_s = sᵀ Q s`.
+    /// Polynomialization: the static polynomial `Ψ_s = sᵀ Q s + P s³`.
     StaticSet,
     /// Polynomialization: the spread of `½ H(z*)` around `Q` over `s`, from
     /// rounding only.
@@ -606,7 +619,13 @@ pub(crate) enum Term {
     Cross,
     /// Polynomialization: `δᵀ (½H) δ`.
     DynamicQuadratic,
-    /// Polynomialization: the third-order Lagrange remainder.
+    /// Polynomialization: the cubic form `⅙ T_c s³` in the static set.
+    CubicStatic,
+    /// Polynomialization: `⅙ T_c (Δz³ − s³)`, the change of the cubic term
+    /// at `z*` during the step.
+    CubicCross,
+    /// Polynomialization: the third-order Lagrange remainder around `T_c`,
+    /// `⅙ (T(ξ) − T_c) Δz³`.
     Remainder,
     /// Polynomialization: the input part `u − u*` of `δ`.
     InputDeviation,

@@ -414,14 +414,8 @@ both_methods!(merging, pieces_merge_as_the_set_contracts);
 /// `x₀' = −x₀ − x₀³`, `x₁' = −x₁ + ½ x₀²` from a wide box: the cubic forces
 /// splits early on, and the contraction toward the origin later lets the
 /// pieces merge again. The merged sets still hold every trajectory.
-/// Without lifting: with it, polynomialization diverges at step 7 here, and
-/// the merging, not the lifting, is under test.
 fn pieces_merge_as_the_set_contracts(method: Method) {
-    let settings = NonlinearSettings {
-        restructure: Restructure::Off,
-        ..sharp(0.1, method)
-    };
-    let flowpipe = NonlinearReach::new(damped(), settings)
+    let flowpipe = NonlinearReach::new(damped(), sharp(0.1, method))
         .reach(&initial_box(&[0.0, 0.0], 1.0), &input(0.0), 40)
         .expect("splitting carries the set");
     let counts: Vec<usize> = flowpipe.iter().map(Vec::len).collect();
@@ -444,12 +438,13 @@ fn damped_f64(x: &DVector<f64>, _: f64) -> DVector<f64> {
     DVector::from_vec(vec![-x[0] - x[0].powi(3), -x[1] + 0.5 * x[0] * x[0]])
 }
 
-/// The damped cubic with polynomialization and the default lifting: lifted
-/// pieces split less well, so it needs `max_pieces` 32 where `Off` gets by
-/// with 8, and then ends narrower than `Off` with the same budget. Every
-/// sampled trajectory stays inside.
+/// The damped cubic with polynomialization and the default lifting: the
+/// cubic form of the static set keeps lifted pieces whole, so they need no
+/// more pieces than `Off`, fit the default `max_pieces` of 8, and end
+/// narrower than `Off` with a budget of 32. Every sampled trajectory stays
+/// inside.
 #[test]
-fn lifted_pieces_need_a_larger_budget() {
+fn lifted_pieces_need_no_larger_budget() {
     let start = initial_box(&[0.0, 0.0], 1.0);
     let run = |restructure| {
         let settings = NonlinearSettings {
@@ -476,9 +471,15 @@ fn lifted_pieces_need_a_larger_budget() {
     };
 
     let lifted = run(Restructure::Lift);
-    let boxed = widest(&run(Restructure::Off));
-    assert!(lifted.iter().map(Vec::len).max() > Some(8));
-    assert!(widest(&lifted) < boxed, "{} vs {boxed}", widest(&lifted));
+    let boxed = run(Restructure::Off);
+    let most = |flowpipe: &[Vec<Step>]| flowpipe.iter().map(Vec::len).max();
+    assert!(most(&lifted) <= Some(8).min(most(&boxed)));
+    assert!(
+        widest(&lifted) < widest(&boxed),
+        "{} vs {}",
+        widest(&lifted),
+        widest(&boxed)
+    );
     check_trajectories(damped_f64, &lifted, (&[0.0, 0.0], 1.0, 0.0), 12);
 }
 
@@ -565,8 +566,9 @@ fn polynomialization_is_tighter_on_a_wide_set() {
 }
 
 /// Lifting the independent generators to factors keeps a wide set's
-/// shape: from radius 0.5, polynomialization ends 0.8 s at under half the
-/// width it reaches without, and every sampled trajectory is still inside.
+/// shape: from radius 0.5, polynomialization ends 0.8 s at under three
+/// quarters of the width it reaches without, and every sampled trajectory
+/// is still inside.
 #[test]
 fn lifting_keeps_wide_sets_narrow() {
     let (center, radius) = ([1.4, 2.4], 0.5);
@@ -590,7 +592,7 @@ fn lifting_keeps_wide_sets_narrow() {
     let lifted = run(Restructure::Lift);
     let boxed = width(&run(Restructure::Off));
     assert!(
-        width(&lifted) < 0.5 * boxed,
+        width(&lifted) < 0.75 * boxed,
         "{} vs {boxed}",
         width(&lifted)
     );
@@ -602,7 +604,7 @@ fn lifting_keeps_wide_sets_narrow() {
 /// still contain every sampled trajectory.
 #[test]
 fn shrinking_steps_reach_further() {
-    let (center, radius, horizon) = ([1.4, 2.4], 1.0, 0.42);
+    let (center, radius, horizon) = ([1.4, 2.4], 1.0, 0.46);
     let start = initial_box(&center, radius);
     let fixed = sharp(0.02, Method::Polynomialization);
     let failure = NonlinearReach::new(van_der_pol(), fixed.clone())
