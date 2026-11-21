@@ -13,8 +13,9 @@ git_release_type = "auto"
 # Release PR branches follow the branching model (release/*), not the default `release-plz-`.
 pr_branch_prefix = "release/"
 # Imperative PR title (the default is "chore: release v..."); squash merges use it as the subject,
-# and the changelog parser skips it via ^Release. One released crate: {{ version }} is always set.
-pr_name = "Release v{{ version }}"
+# and the changelog parser skips it via ^Release. {{ package }} is set only for one crate and
+# {{ version }} only for one crate or a shared version; unset variables fail the render.
+pr_name = "Release{% if package and version %} {{ package }} v{{ version }}{% elif version %} v{{ version }}{% endif %}"
 # Commits are imperative ("Add X", "Fix Y"), not Conventional Commits: map verbs to bumps.
 custom_minor_increment_regex = "^(Add|Introduce|Support|Allow|Implement|Expose)\\b"
 custom_major_increment_regex = "(?m)^BREAKING CHANGE:|^Break\\b"
