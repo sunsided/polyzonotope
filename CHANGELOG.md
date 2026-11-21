@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0](https://github.com/sunsided/polyzonotope/compare/v0.3.0...v0.4.0) - 2026-11-21
+
+### Added
+
+- Add cubic_map for sparse polynomial zonotopes
+
+### Changed
+
+- Share the corner search, factor ranking and split loop
+
 ## [0.3.0](https://github.com/sunsided/polyzonotope/compare/v0.2.0...v0.3.0) - 2026-11-21
 
 ### Added

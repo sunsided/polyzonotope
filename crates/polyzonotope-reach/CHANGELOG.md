@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.1](https://github.com/sunsided/polyzonotope/compare/polyzonotope-reach-v0.1.0...polyzonotope-reach-v0.1.1) - 2026-11-21
+
+### Changed
+
+- Name the state count up to which the cubic generator cap holds
+- Use SparsePolyZonotope::can_split when choosing a split
+- Stretch the last step of reach_for over a rounding residue
+- Cap the generators of the cubic static error
+- Bound the motion during a step by the linear model as well ([#28](https://github.com/sunsided/polyzonotope/pull/28))
+- Make Restructure::Off the default ([#27](https://github.com/sunsided/polyzonotope/pull/27))
+- Pair input generators in the time-interval hull and cross-check against CORA ([#26](https://github.com/sunsided/polyzonotope/pull/26))
+- Keep the cubic term of polynomialization in the static set ([#25](https://github.com/sunsided/polyzonotope/pull/25))
+- Refuse unbounded third derivatives before taking their midpoints
+- Scope the cost of lifting to runs without merging
+- Restore the large-set test and guard the CORA gap
+- Mark polyzonotope-reach as released and shorten its roadmap ([#24](https://github.com/sunsided/polyzonotope/pull/24))
+- Bound the motion during a step by the linear model as well
+- Make Restructure::Off the default
+- Refresh the numbers the cubic term and the hull fix moved
+- Explain the time-interval gap to CORA
+- Enclose the rounding of ½ (I ± Φ_c) in the time-interval hull
+- Cross-check LinearReach against CORA's linearSys
+- Pair the independent generators in the time-interval hull
+- Keep the cubic term of polynomialization in the static set
+- Shorten the polyzonotope-reach roadmap
+- Mark polyzonotope-reach as released in its README
+
 ## [0.1.0](https://github.com/sunsided/polyzonotope/releases/tag/polyzonotope-reach-v0.1.0) - 2026-11-21
 
 ### Added
