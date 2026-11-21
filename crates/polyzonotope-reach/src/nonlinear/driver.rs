@@ -18,8 +18,8 @@ use crate::{Dynamics, ReachError, ReachFailure, Step};
 /// [`reach_for`](NonlinearReach::reach_for) start with
 /// [`NonlinearSettings::step`](super::NonlinearSettings::step). When a piece
 /// diverges or the Taylor bound fails, the whole time step is retried with
-/// the step times `shrink`, as long as that stays at least `min_step`; only
-/// at the shortest step are pieces split. After a time step whose pieces all
+/// the step times `shrink`, but never shorter than `min_step`; only at
+/// `min_step` itself are pieces split. After a time step whose pieces all
 /// confirmed their error within `easy_guesses` guesses, the next step is
 /// `grow` times longer, at most `max_step`. Each [`Step`] records its
 /// [`duration`](Step::duration).
@@ -304,7 +304,7 @@ impl<D: Dynamics> NonlinearReach<D> {
     fn time_step(&self, run: &mut Run, u: &Zonotope, mut length: f64) -> Result<(), ReachError> {
         let adaptive = self.settings.adaptive.as_ref();
         loop {
-            let shrinkable = adaptive.is_some_and(|a| length * a.shrink >= a.min_step);
+            let shrinkable = adaptive.is_some_and(|a| length > a.min_step);
             match self.advance(run.pieces.clone(), u, length, !shrinkable) {
                 Ok(advanced) => {
                     run.step = grown(adaptive, run.step.min(length), advanced.guesses);
@@ -315,7 +315,8 @@ impl<D: Dynamics> NonlinearReach<D> {
                     return Ok(());
                 }
                 Err(ReachError::AbstractionDiverged | ReachError::StepTooLarge) if shrinkable => {
-                    length *= adaptive.map_or(1.0, |a| a.shrink);
+                    // Clamped, so that `min_step` itself is tried before pieces split.
+                    length = adaptive.map_or(length, |a| (length * a.shrink).max(a.min_step));
                 }
                 Err(e) => return Err(e),
             }
