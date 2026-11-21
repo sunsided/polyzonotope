@@ -12,7 +12,7 @@ keywords = ["reachability", "zonotope", "verification", "set-based", "dynamics"]
 categories = ["mathematics", "science", "no-std"]
 
 [dependencies]
-polyzonotope = { version = "0.2", path = "../..", default-features = false }
+polyzonotope = { version = "0.3", path = "../..", default-features = false }
 
 nalgebra = { version = "0.35", default-features = false, features = ["alloc", "libm"] }
 libm = "0.2"

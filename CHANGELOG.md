@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0](https://github.com/sunsided/polyzonotope/compare/v0.2.0...v0.3.0) - 2026-11-21
+
+### Added
+
+- Add a benchmark for nonlinear reachability
+- Add linear reachability to polyzonotope-reach
+- Add interval arithmetic and interval-matrix maps
+
+### Changed
+
+- Render the release PR title for several crates
+- Build tests at opt-level 1
+- Turn the repository into a workspace with polyzonotope-reach
+
 ## [0.2.0](https://github.com/sunsided/polyzonotope/compare/v0.1.0...v0.2.0) - 2026-11-20
 
 ### Added
