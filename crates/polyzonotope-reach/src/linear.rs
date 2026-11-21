@@ -169,14 +169,20 @@ fn hull_with_successor(
     let n = x.dim();
     let (center, radius) = phi.center_radius();
     let identity = DMatrix::identity(n, n);
-    let half_offset = offset.center() * 0.5;
+    // ½ (I ± Φ_c) in interval arithmetic, so that the rounding of the sums
+    // is enclosed; interval_map still maps every generator in place.
+    let halved = |sign: f64| {
+        IntervalMatrix::point(&identity)
+            .add(&IntervalMatrix::point(&(&center * sign)))
+            .scale(Interval::point(0.5))
+    };
+    let offset_point = Zonotope::new(offset.center().clone(), DMatrix::zeros(n, 0));
+    let half_offset = without_factors(&offset_point).linear_map(&(&identity * 0.5));
 
-    let mean = x
-        .linear_map(&((&identity + &center) * 0.5))
-        .translate(&half_offset);
+    let mean = x.interval_map(&halved(1.0)).exact_plus(&half_offset);
     let difference = x
-        .linear_map(&((&identity - &center) * 0.5))
-        .translate(&-&half_offset);
+        .interval_map(&halved(-1.0))
+        .exact_plus(&half_offset.linear_map(&-&identity));
     let swing = SparsePolyZonotope::new(
         DVector::zeros(n),
         DMatrix::zeros(n, 0),
