@@ -128,9 +128,13 @@ fn time_point_hulls_match_cora() {
 }
 
 /// Over the step, both sides enclose the hull of the step ends with the
-/// curvature corrections `F X` and `F̃ u` of Althoff (2010). They bound the
-/// corrections differently, so the hulls agree within 1% of the width,
-/// where the ten steps here differ by at most 0.54%. The gap must not grow
+/// curvature corrections `F X` and `F̃ u` of Althoff (2010), with the same
+/// `F` up to the remainder bounds. Under Octave, CORA cannot multiply an
+/// interval matrix with a zonotope and falls back to `F □X`, the product
+/// with the interval hull, where [`LinearReach`] maps the zonotope by the
+/// center of `F` and boxes only the radius. Neither encloses the other, so
+/// the hulls agree within 1% of the width, where the ten steps here differ
+/// by at most 0.54%. The gap must not grow
 /// with the steps: when the hull lost the pairing of the input generators
 /// of `X` with their images, it reached 18% after ten steps.
 #[test]
