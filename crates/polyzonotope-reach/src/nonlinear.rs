@@ -126,9 +126,11 @@ pub enum Method {
     ///
     /// The static error acts on the trajectory as a constant input `v = ψ_s(x_k)`.
     /// The step therefore runs the linear reach on the augmented system
-    /// `x' = A x + v + B u + w + ψ_d`, `v' = 0`, from
-    /// `X × Ψ_s` built with [`SparsePolyZonotope::cartesian_product`](polyzonotope::SparsePolyZonotope::cartesian_product), which
-    /// keeps the shared factors: `(x_k, ψ_s(x_k))` is a point of it. The linear
+    /// `x' = A x + v + B u + w + ψ_d`, `v' = 0`, `x₀' = 0`, from
+    /// `{ (x_k, ψ_s(x_k), x_k) | x_k ∈ X }`, built by one linear map of `X`
+    /// and [`SparsePolyZonotope::exact_plus`](polyzonotope::SparsePolyZonotope::exact_plus),
+    /// which keep the shared factors and pair the independent generators of
+    /// both copies of `x_k`. The linear
     /// reach is sound for any input signal in its input set, so with
     /// `ψ_d(t) ∈ Ψ̄` for all `t` of the step, the projection of its sets onto
     /// `x` holds the trajectory at `t_{k+1}` and during the step. The static
@@ -138,10 +140,13 @@ pub enum Method {
     /// The dynamic part needs boxes of `s`, `δ` and `Δz`. The step
     /// takes `s` from the interval hull of `X − x_m`, `Δz` from the hull of the
     /// time-interval set `R(τ)` and `U`, the input part of `δ` from `U − u*`, and
-    /// the state part from the flow:
-    /// `x(t) − x_k = ∫_{t_k}^t f(z(σ)) dσ ∈ [0, r] · f(□R(τ) × □U)`, minus `c`
-    /// (enclosed in interval arithmetic), as long as the trajectory stays in
-    /// `R(τ)` up to `t`. That is the same hypothesis the
+    /// the state part, minus `c`, from two enclosures of `x(t) − x_k`,
+    /// intersected: the flow,
+    /// `x(t) − x_k = ∫_{t_k}^t f(z(σ)) dσ ∈ [0, r] · f(□R(τ) × □U)`
+    /// (enclosed in interval arithmetic), and the hull of `x − x₀` over the
+    /// augmented time-interval set, where the factors of `x_k` cancel. Both
+    /// hold as long as the trajectory stays in `R(τ)` up to `t` with its
+    /// error in `Ψ̄`. That is the same hypothesis the
     /// guess-and-check loop proves for every other term, so the usual argument
     /// closes: if the dynamic error computed over `R(τ)` lies in the guess `Ψ̄`,
     /// no trajectory can leave `R(τ)` during the step, because up to the first
@@ -199,11 +204,11 @@ pub enum Restructure {
     /// unused ones.
     ///
     /// The gain is small: on Van der Pol from radius 0.5, polynomialization
-    /// ends 40 steps 6% narrower than with [`Off`](Self::Off), and from
-    /// radius 1 both prove the same 22 steps. On the damped cubic
+    /// ends 40 steps 3% narrower than with [`Off`](Self::Off), and from
+    /// radius 1 it proves 26 steps instead of 25. On the damped cubic
     /// `x₀' = −x₀ − x₀³` from radius 1, both need 6 pieces, and the lifted
-    /// sets end 15% wider; but lifted pieces merge back to 3, where
-    /// unlifted ones stay apart, so that run takes 4.0 s instead of 4.8 s.
+    /// sets end 31% wider; but lifted pieces merge back to 3, where
+    /// unlifted ones stay apart, so that run takes 4.6 s instead of 6.8 s.
     Lift,
 }
 
@@ -461,12 +466,15 @@ impl<D: Dynamics> NonlinearReach<D> {
         let expansion =
             polynomialization::static_error(&self.dynamics, model, x, limits, attempt.terms)?;
         let start = if attempt.terms.has(Term::StaticSet) {
-            x.cartesian_product(&expansion.static_set)
+            polynomialization::augmented_start(x, &expansion.static_set)
         } else {
-            x.cartesian_product(&SparsePolyZonotope::from_zonotope(&Zonotope::new(
-                DVector::zeros(n),
-                DMatrix::zeros(n, 0),
-            )))
+            polynomialization::augmented_start(
+                x,
+                &SparsePolyZonotope::from_zonotope(&Zonotope::new(
+                    DVector::zeros(n),
+                    DMatrix::zeros(n, 0),
+                )),
+            )
         };
         let system = polynomialization::augmented_system(&model.a);
         let linear = LinearReach::new(system, attempt.step, self.settings.taylor_terms)?;
@@ -476,10 +484,11 @@ impl<D: Dynamics> NonlinearReach<D> {
             let step = linear.step(&start, &with_error(&known, &model.offset, assumed));
             let states = polynomialization::project(&step.time_interval, n)
                 .reduce(self.settings.order, Reduction::Girard);
+            let drift = polynomialization::drift(&step.time_interval, n);
             let actual = polynomialization::dynamic_error(
                 &self.dynamics,
                 (model, &expansion),
-                (&states, u),
+                (&states, &drift, u),
                 attempt.step,
                 attempt.terms,
             )?;
