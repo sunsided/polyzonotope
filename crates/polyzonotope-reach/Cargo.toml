@@ -2,7 +2,7 @@
 name = "polyzonotope-reach"
 description = "Validated reachable-set over-approximation of nonlinear dynamics with polynomial zonotopes"
 # The first release; later versions come from release-plz (0.0.0 only claimed the name).
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 rust-version = "1.89"
@@ -12,7 +12,7 @@ keywords = ["reachability", "zonotope", "verification", "set-based", "dynamics"]
 categories = ["mathematics", "science", "no-std"]
 
 [dependencies]
-polyzonotope = { version = "0.3", path = "../..", default-features = false }
+polyzonotope = { version = "0.4", path = "../..", default-features = false }
 
 nalgebra = { version = "0.35", default-features = false, features = ["alloc", "libm"] }
 libm = "0.2"
