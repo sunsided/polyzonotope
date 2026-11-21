@@ -22,6 +22,23 @@ How well that works depends on how the set is described. This crate has three de
 - A zonotope is a center plus a few direction vectors, each stretched by some amount between -1 and 1. It can be skewed and stays exact under rotations, scaling and sums, so linear models don't blow it up.
 - A sparse polynomial zonotope also allows those amounts to be multiplied with each other and raised to powers. That gives curved shapes (the parabola in the example below is one), and it keeps track of which uncertain quantity is which: two sets derived from the same sensor reading stay linked, instead of each pretending the other could take any value.
 
+The crate is `no_std` with `alloc`, forbids `unsafe`, and with the `sound` feature rounds every enclosure outward, so its proofs hold in floating point too. Its main operations are cross-checked against [CORA](https://github.com/TUMcps/CORA), the MATLAB toolbox for reachability analysis.
+
+## Who this is for
+
+- Engineers verifying controllers for drones, vehicles, robot arms or spacecraft, who need to show that every state reachable under bounded noise and parameter uncertainty stays inside a safe region.
+- Researchers in set-based methods who want sparse polynomial zonotopes, zonotope order reduction and three-valued polytope checks in Rust, without a MATLAB runtime.
+- Embedded targets: the sets work without `std`, down to Cortex-M0 with a `critical-section` implementation.
+- To propagate sets through linear or nonlinear dynamics over time (flowpipes), use [polyzonotope-reach](https://github.com/sunsided/polyzonotope/tree/main/crates/polyzonotope-reach) from this workspace, which builds on these types.
+- To plan paths whose edges are proven safe under uncertainty, [robust-planning](https://github.com/sunsided/robust-planning) wraps these sets in Robust-RRT, Robust RRT* and a reachability-guided search; for plain sampling-based planning without uncertainty, [sampling-planning](https://github.com/sunsided/sampling-planning).
+
+## Installation
+
+```toml
+[dependencies]
+polyzonotope = "0.4"
+```
+
 ## The representation
 
 ```text
@@ -105,7 +122,7 @@ cargo run --example rrt_reach              # target/plots/rrt.svg: an RRT that k
 The crate is `no_std` with `alloc`. The default `std` feature only switches monomial powers to `f64::powi`; without it, they are computed by repeated squaring:
 
 ```toml
-polyzonotope = { version = "0.2", default-features = false }
+polyzonotope = { version = "0.4", default-features = false }
 ```
 
 Fresh `FactorId`s come from a global 64-bit counter in [`portable-atomic`](https://crates.io/crates/portable-atomic). Targets with 64-bit atomics, and those with 32-bit compare-and-swap such as Cortex-M3/M4, work as they are. Targets without any atomic read-modify-write, such as Cortex-M0 (`thumbv6m-none-eabi`) or `riscv32imc`, need portable-atomic's `critical-section` feature in your own `Cargo.toml`, plus a [`critical-section`](https://crates.io/crates/critical-section) implementation for the chip.
@@ -132,7 +149,7 @@ By default, arithmetic is plain `f64`. An enclosure can then miss a point by a f
 So under `sound`, the number of generators can grow after any exact operation, and so can the number of `β` values that positional `evaluate` expects. That is up to `2 · dim` per call, since `exact_plus` and `split` append one batch and their internal `compact` may append another. Cargo unifies features across the dependency graph, so read the count instead of assuming it: `independent_generators().ncols()` on a `SparsePolyZonotope`, `num_generators()` on a `Zonotope`. The error generators pile up over long chains of operations. `reduce` folds them back into a box.
 
 ```toml
-polyzonotope = { version = "0.2", features = ["sound"] }
+polyzonotope = { version = "0.4", features = ["sound"] }
 ```
 
 inari needs `std` and runs only on x86-64 (Haswell or newer) and `AArch64`. On x86-64, set the target CPU in your `.cargo/config.toml`:
@@ -141,9 +158,6 @@ inari needs `std` and runs only on x86-64 (Haswell or newer) and `AArch64`. On x
 [target.'cfg(target_arch = "x86_64")']
 rustflags = ["-C", "target-cpu=haswell"]
 ```
-
-## Roadmap
-1. [`polyzonotope-reach`](https://github.com/sunsided/polyzonotope/tree/main/crates/polyzonotope-reach) (in this workspace): nonlinear reachability by conservative polynomialization (Althoff 2013), with a CORA cross-check of the reachable sets.
 
 ## License
 

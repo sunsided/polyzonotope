@@ -1,6 +1,6 @@
 [package]
 name = "polyzonotope-reach"
-description = "Validated reachable-set over-approximation of nonlinear dynamics with polynomial zonotopes"
+description = "Validated reachable-set over-approximation of linear and nonlinear dynamics with sparse polynomial zonotopes"
 # The first release; later versions come from release-plz (0.0.0 only claimed the name).
 version = "0.1.1"
 edition = "2024"
@@ -8,7 +8,7 @@ license = "MIT OR Apache-2.0"
 rust-version = "1.89"
 repository = "https://github.com/sunsided/polyzonotope"
 readme = "README.md"
-keywords = ["reachability", "zonotope", "verification", "set-based", "dynamics"]
+keywords = ["reachability", "zonotope", "verification", "flowpipe", "nonlinear"]
 categories = ["mathematics", "science", "no-std"]
 
 [dependencies]
