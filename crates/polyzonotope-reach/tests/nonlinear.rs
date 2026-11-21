@@ -340,6 +340,17 @@ fn oversized_set_is_refused(method: Method) {
     );
 }
 
+/// Zero guesses would refuse every step untried, so the settings reject it.
+#[test]
+#[should_panic(expected = "max_iterations must be at least 1")]
+fn zero_iterations_are_rejected() {
+    let settings = NonlinearSettings {
+        max_iterations: 0,
+        ..NonlinearSettings::new(0.05)
+    };
+    let _ = NonlinearReach::new(van_der_pol(), settings);
+}
+
 /// A degree-9 field that overflows `f64` during the error check is
 /// refused, not a panic, even under `sound`.
 fn overflow_is_refused(method: Method) {

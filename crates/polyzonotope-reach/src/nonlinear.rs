@@ -202,7 +202,8 @@ pub struct NonlinearSettings {
     /// Order (generators per dimension, at least 1) the sets are reduced to
     /// after every step and before the error is computed.
     pub order: f64,
-    /// How often the error guess may be enlarged before the step is given up.
+    /// Most guesses of the error per step, at least 1: the first guess plus
+    /// up to `max_iterations − 1` enlargements before the step is given up.
     pub max_iterations: usize,
     /// Relative widening of the error guess on each retry: every bound moves
     /// outward by this fraction of the interval's magnitude.
@@ -318,8 +319,8 @@ impl<D: Dynamics> NonlinearReach<D> {
     /// # Panics
     ///
     /// Panics if the step is not positive and finite, the order is below 1,
-    /// `enlarge` or `merge_tolerance` is negative, `max_pieces` or
-    /// `max_degree` is zero, or, with [`Adaptive`] steps, `min_step` is not
+    /// `enlarge` or `merge_tolerance` is negative, `max_iterations`,
+    /// `max_pieces` or `max_degree` is zero, or, with [`Adaptive`] steps, `min_step` is not
     /// positive, `max_step` not finite, `step` not in
     /// `[min_step, max_step]`, `shrink` not in `(0, 1)` or `grow` below 1.
     #[must_use]
@@ -333,6 +334,10 @@ impl<D: Dynamics> NonlinearReach<D> {
         assert!(
             settings.merge_tolerance >= 0.0,
             "merge_tolerance must not be negative"
+        );
+        assert!(
+            settings.max_iterations >= 1,
+            "max_iterations must be at least 1"
         );
         assert!(settings.max_pieces >= 1, "max_pieces must be at least 1");
         assert!(settings.max_degree >= 1, "max_degree must be at least 1");
