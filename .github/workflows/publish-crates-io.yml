@@ -40,10 +40,10 @@ jobs:
       - uses: taiki-e/install-action@75a7c0f87bd666af3cdb75c5b9e9d03ab6044e6f # v2.90.6
         with:
           tool: cargo-nextest
-      - run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
-      - run: cargo nextest run --workspace --all-features --locked
+      - run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+      - run: cargo nextest run --workspace --all-features
       # Remove for binary-only crates (no library target, no doctests).
-      - run: cargo test --workspace --all-features --doc --locked
+      - run: cargo test --workspace --all-features --doc
 
   crates-io:
     name: publish to crates.io
@@ -111,7 +111,7 @@ jobs:
         id: auth
       - name: Publish
         if: steps.check.outputs.published != 'true'
-        run: cargo publish -p "$CRATE" --locked
+        run: cargo publish -p "$CRATE"
         env:
           CRATE: ${{ steps.crate.outputs.name }}
           CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
