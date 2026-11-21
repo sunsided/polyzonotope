@@ -150,27 +150,29 @@ pub(super) fn width(pz: &SparsePolyZonotope) -> f64 {
 /// `cap` keeps a merge from undoing a split: a piece is split because it is
 /// too large to step, so the caller passes a width below the pieces that
 /// failed.
-/// `finish` reduces each merged piece, since a merge adds generators.
+/// `finish` reduces each merged piece, since a merge adds generators; `cap`
+/// applies to the finished piece, which reduction may have widened.
 pub(super) fn merge(
     mut pieces: Vec<SparsePolyZonotope>,
     tolerance: f64,
     cap: f64,
     finish: impl Fn(&SparsePolyZonotope) -> SparsePolyZonotope,
 ) -> Vec<SparsePolyZonotope> {
-    while let Some((i, j, merged)) = best_merge(&pieces, tolerance, cap) {
+    while let Some((i, j, merged)) = best_merge(&pieces, tolerance, cap, &finish) {
         pieces.swap_remove(j);
-        pieces[i] = finish(&merged);
+        pieces[i] = merged;
     }
 
     pieces
 }
 
 /// The pair `(i, j)`, `i < j`, of `pieces` whose merge is cheapest within
-/// `tolerance` and `cap`, with that merge.
+/// `tolerance` and `cap`, with that merge after `finish`.
 fn best_merge(
     pieces: &[SparsePolyZonotope],
     tolerance: f64,
     cap: f64,
+    finish: impl Fn(&SparsePolyZonotope) -> SparsePolyZonotope,
 ) -> Option<(usize, usize, SparsePolyZonotope)> {
     let hulls: Vec<_> = pieces
         .iter()
@@ -182,8 +184,13 @@ fn best_merge(
             let merged = hull_of_pair(&pieces[i], &pieces[j]);
             let ratio = volume(&merged.interval_hull()) / (volume(&hulls[i]) + volume(&hulls[j]));
             let fits = width(&merged) <= cap && ratio <= 1.0 + tolerance;
-            if fits && best.as_ref().is_none_or(|b| ratio < b.0) {
-                best = Some((ratio, i, j, merged));
+            if !fits || best.as_ref().is_some_and(|b| ratio >= b.0) {
+                continue;
+            }
+            // Only candidates that would become the best get finished.
+            let finished = finish(&merged);
+            if width(&finished) <= cap {
+                best = Some((ratio, i, j, finished));
             }
         }
     }
@@ -359,6 +366,19 @@ mod tests {
             merge(alloc::vec![lower, upper], 0.05, cap, Clone::clone).len(),
             2
         );
+    }
+
+    /// The cap holds for the finished piece: a merge that fits only before
+    /// `finish` widens it is not taken.
+    #[test]
+    fn cap_applies_after_finish() {
+        let pz = mixed();
+        let (lower, upper) = halves(&pz, width, Splitting::Factors).unwrap();
+        let widen = |m: &SparsePolyZonotope| {
+            m.linear_map(&DMatrix::from_diagonal_element(m.dim(), m.dim(), 2.0))
+        };
+        let cap = width(&pz) + 1e-12;
+        assert_eq!(merge(alloc::vec![lower, upper], 0.05, cap, widen).len(), 2);
     }
 
     /// Far-apart pieces stay separate: their hull is mostly empty space.
