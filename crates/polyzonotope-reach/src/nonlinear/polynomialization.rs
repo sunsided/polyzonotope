@@ -1,5 +1,6 @@
-//! Conservative polynomialization (Althoff 2013): the second-order part of
-//! the abstraction error at the start of the step stays a polynomial
+//! Conservative polynomialization (Althoff 2013): the second- and
+//! third-order part of the abstraction error at the start of the step stays
+//! a polynomial
 //! zonotope over the factors of the set, and only what changes during the
 //! step goes through interval arithmetic.
 //!

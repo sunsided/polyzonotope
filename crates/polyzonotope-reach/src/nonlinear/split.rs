@@ -39,9 +39,9 @@ use polyzonotope::{FactorId, Interval, IntervalBox, Reduction, SparsePolyZonotop
 ///   along the axis, where a factor split halves one generator's share of
 ///   it.
 ///
-/// On the cubic drift `x₀' = x₀³` from a box of radius 0.5, factor splits
-/// alone needed 30 pieces where box splits needed fewer than 8, so the
-/// cheaper of the two wins, split by split, unless `splitting` is
+/// On the cubic drift `x₀' = x₀³` from a box of radius 0.5, linearization
+/// with factor splits alone needs 4 pieces where the cheaper split needs 2,
+/// so the cheaper of the two wins, split by split, unless `splitting` is
 /// [`Splitting::Factors`].
 pub(super) fn halves(
     piece: &SparsePolyZonotope,

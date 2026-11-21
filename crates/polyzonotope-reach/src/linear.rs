@@ -153,8 +153,10 @@ pub(crate) fn without_factors(z: &Zonotope) -> SparsePolyZonotope {
 /// (Girard 2005), with `Φ = Φ_c ± R` the interval matrix `phi` and `w` from
 /// `offset`, a point `w_c` plus independent generators:
 ///
-/// `λ x + (1 − λ)(Φ_c x + w_c) = ½ (x + Φ_c x + w_c) + (λ − ½)(x − Φ_c x − w_c)`.
-/// The first part keeps the factors of `X`. In the second, `2λ − 1 ∈ [-1, 1]`
+/// `λ x + (1 − λ)(Φ_c x + w_c) = ½ (I + Φ_c) x + ½ w_c + (λ − ½)((I − Φ_c) x − w_c)`.
+/// Both parts are linear maps of the one point `x`, so the first keeps the
+/// factors of `X` and pairs each independent generator of `x` with its image
+/// under `Φ_c`, as CORA's `enclose` does. In the second, `2λ − 1 ∈ [-1, 1]`
 /// multiplies every term, so each generator of `½ (X − Φ_c X − w_c)`, its
 /// center included, becomes an independent generator: even monomials lose
 /// their sign there. `(Φ − Φ_c) x ∈ [-R, R] X` covers the spread of `phi`,
@@ -166,13 +168,21 @@ fn hull_with_successor(
 ) -> SparsePolyZonotope {
     let n = x.dim();
     let (center, radius) = phi.center_radius();
-    let half = DMatrix::from_diagonal_element(n, n, 0.5);
-    let successor = x.linear_map(&center).translate(offset.center());
+    let identity = DMatrix::identity(n, n);
+    // ½ (I ± Φ_c) in interval arithmetic, so that the rounding of the sums
+    // is enclosed; interval_map still maps every generator in place.
+    let halved = |sign: f64| {
+        IntervalMatrix::point(&identity)
+            .add(&IntervalMatrix::point(&(&center * sign)))
+            .scale(Interval::point(0.5))
+    };
+    let offset_point = Zonotope::new(offset.center().clone(), DMatrix::zeros(n, 0));
+    let half_offset = without_factors(&offset_point).linear_map(&(&identity * 0.5));
 
-    let mean = x.linear_map(&half).exact_plus(&successor.linear_map(&half));
+    let mean = x.interval_map(&halved(1.0)).exact_plus(&half_offset);
     let difference = x
-        .linear_map(&half)
-        .exact_plus(&successor.linear_map(&-&half));
+        .interval_map(&halved(-1.0))
+        .exact_plus(&half_offset.linear_map(&-&identity));
     let swing = SparsePolyZonotope::new(
         DVector::zeros(n),
         DMatrix::zeros(n, 0),

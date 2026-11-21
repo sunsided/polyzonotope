@@ -68,7 +68,7 @@ The inputs are never static, since `u(t)` may jump inside `U` during the step: e
 
 ### Keeping dependencies through reduction
 
-The linear step and the order reduction make generators independent: the error box, the time-interval hull, and every dependent monomial that reduction encloses. In the next step's quadratic map, products of independent generators are enclosed one by one, so a wide set loses its shape step by step. With `Restructure::Lift` (the default), every independent generator of the time-point set becomes a dependent factor of its own after the Girard reduction. That is exact, and later quadratic maps then treat those factors as polynomials. It costs 2 to 3 times as much per step. Lifted pieces also split less well, so systems that split a lot need roughly twice the `max_pieces` they need without lifting: the damped cubic of the tests needs 12 pieces instead of 6, and with 32 it ends 17% narrower than without lifting. `Restructure::Off` keeps the old behavior.
+The linear step and the order reduction make generators independent: the error box, the time-interval hull, and every dependent monomial that reduction encloses. In the next step's quadratic map, products of independent generators are enclosed one by one, so a wide set loses its shape step by step. With `Restructure::Lift` (the default), every independent generator of the time-point set becomes a dependent factor of its own after the Girard reduction. That is exact, and later quadratic maps then treat those factors as polynomials. It costs 1.5 to 1.7 times as much, and gains little since the time-interval hull pairs the independent generators of `X` with their images: on Van der Pol from `ρ = 0.5`, polynomialization ends 6% narrower with lifting, and on the damped cubic of the tests 15% wider, with 6 pieces either way. `Restructure::Off` keeps the generators independent.
 
 ### Adaptive steps
 
@@ -82,22 +82,22 @@ From `[1.4, 2.4] ± ρ` over 0.8 s, with 12 Taylor terms, order 20 and up to 8 p
 
 | `ρ` | setting | linearization: proven, width at 0.16 s | polynomialization: proven, width at 0.16 s / 0.4 s / 0.8 s |
 |-----|---------|-----------------------------|-----------------------------------------|
-| 0.5 | `Off`, step 0.02 | 0.48 s, 3.71 | 0.8 s, 3.41 / 4.16 / 15.6 |
-| 0.5 | `Lift`, step 0.02 | 0.8 s, 3.51 | 0.8 s, 3.39 / 3.87 / 4.20 |
-| 0.5 | `Lift`, step 0.01 | 0.8 s, 3.44 | 0.8 s, 3.24 / 3.36 / 2.71 |
+| 0.5 | `Off`, step 0.02 | 0.8 s, 3.51 | 0.8 s, 3.32 / 3.61 / 3.42 |
+| 0.5 | `Lift`, step 0.02 | 0.8 s, 3.51 | 0.8 s, 3.32 / 3.56 / 3.22 |
+| 0.5 | `Lift`, step 0.01 | 0.8 s, 3.44 | 0.8 s, 3.16 / 3.08 / 2.13 |
 | 0.5 | true | | 2.74 / 2.30 / 1.09 |
-| 1 | `Off`, step 0.02 | 0.22 s, 34.4 | 0.34 s, 9.91 / — / — |
-| 1 | `Lift`, step 0.02 | 0.26 s, 13.9 | 0.40 s, 9.39 / 123 / — |
-| 1 | `Lift`, step 0.02, adaptive down to 0.001 | 0.29 s, 13.9 | 0.44 s, 9.39 / — / — |
-| 1 | `Lift`, step 0.01 | 0.33 s, 11.3 | 0.50 s, 8.48 / 26.0 / — |
-| 1 | `Lift`, step 0.01, adaptive down to 0.001 | 0.34 s, 11.3 | 0.52 s, 8.48 / — / — |
+| 1 | `Off`, step 0.02 | 0.26 s, 13.9 | 0.44 s, 8.72 / 44.4 / — |
+| 1 | `Lift`, step 0.02 | 0.26 s, 13.9 | 0.44 s, 8.62 / 33.8 / — |
+| 1 | `Lift`, step 0.02, adaptive down to 0.001 | 0.29 s, 13.9 | 0.49 s, 8.62 / 33.8 / — |
+| 1 | `Lift`, step 0.01 | 0.33 s, 11.3 | 0.61 s, 7.63 / 13.1 / — |
+| 1 | `Lift`, step 0.01, adaptive down to 0.001 | 0.33 s, 11.3 | 0.64 s, 7.63 / 13.1 / — |
 | 1 | true | | 5.34 / 4.66 / 2.47 |
 
-From `ρ = 1`, neither method gets far: the error box of a set that wide feeds on itself. Lifting and shorter steps push the failure out from 0.34 s to 0.52 s with polynomialization, and from 0.22 s to 0.34 s with linearization, and cut the width at 0.16 s from 34.4 (linearization, before) to 8.48 against a true 5.34. From `ρ = 0.5` with lifting and step 0.01, polynomialization's set shrinks again after 0.4 s, as the true set does, though at 2.5 times its width. Lifting also makes linearization's quadratic error exact on the lifted factors, so the two methods end within 1% of each other from `ρ = 0.2`.
+From `ρ = 1`, neither method gets far: the error box of a set that wide feeds on itself. Shorter steps push the failure out from 0.44 s to 0.64 s with polynomialization, and from 0.26 s to 0.33 s with linearization; the width at 0.16 s is 7.63 against a true 5.34. From `ρ = 0.5` with step 0.01, polynomialization's set shrinks after 0.4 s, as the true set does, though at twice its width. From `ρ = 0.2` the two methods end within 4% of each other.
 
 ### Splitting and merging
 
-Both sets are reduced to the configured order after every step. `reach` runs a number of steps and `reach_for` a duration. A piece that diverges is split in two and retried, up to `max_pieces` pieces per step. The split cuts the factor of the piece, or the axis of its oriented box, whose halves have the smallest second-order error bound `Σ_i |r|ᵀ |H_i| |r|`. Factor splits keep the dependencies. The independent generators are boxed and turned into factors first, so that a factor split can reach the bulk of the set. Box splits halve the whole extent along an axis. On Van der Pol and the cubic drift, each kind wins about half of the splits. `Splitting::Factors` allows factor splits only, which keeps every dependency but needs more pieces: 30 instead of 4 for the cubic drift from radius 0.5.
+Both sets are reduced to the configured order after every step. `reach` runs a number of steps and `reach_for` a duration. A piece that diverges is split in two and retried, up to `max_pieces` pieces per step. The split cuts the factor of the piece, or the axis of its oriented box, whose halves have the smallest second-order error bound `Σ_i |r|ᵀ |H_i| |r|`. Factor splits keep the dependencies. The independent generators are boxed and turned into factors first, so that a factor split can reach the bulk of the set. Box splits halve the whole extent along an axis. On Van der Pol and the cubic drift, each kind wins about half of the splits. `Splitting::Factors` allows factor splits only, which keeps every dependency but needs more pieces: 4 instead of 2 for the cubic drift from radius 0.5 with linearization.
 
 After each step, two pieces merge into one when the hull of their merged enclosure is at most `merge_tolerance` (default 10%) larger by volume than their two hulls together. The merged set is also never wider than half the narrowest piece that has diverged so far. The merge encloses `λ a + (1 − λ) b` as `½ (a + b) + ν ½ (a − b)` with a fresh factor `ν`. The factors of the two pieces are paired, so two halves of a factor split merge back into their parent exactly.
 
@@ -141,6 +141,8 @@ With the `sound` feature, the rounding of the floating-point computation is cove
 
 The linear tests compare against reference trajectories: matrix exponentials of the augmented system, and inputs that jump inside `U`. They check the state at the end of each step and at sampled times inside it, against both the interval hull and the support function in random directions. Without inputs, the time-point set must equal `e^{Ar} X` at matching factor values. Removing the Taylor remainder, `F`, `F̃` or `R_p` makes at least one test fail.
 
+A cross-check against [CORA](https://github.com/TUMcps/CORA): `tests/cora/generate.m` steps four linear systems with CORA's `linearSys/oneStep`, ten steps each from the time-point set of the last, and writes the interval hulls to `tests/cora/reference.txt`, which `tests/cora.rs` compares against. The time-point hulls agree within 1e-5 of their width and the time-interval hulls within 1%. That gap is the state correction `F X`: under Octave, CORA cannot multiply an interval matrix with a zonotope and falls back to `F` times the interval hull of `X`, where `LinearReach` maps `X` by the center of `F` and boxes only the radius. Regenerate from the repository root with `CORA_PATH=/path/to/CORA octave --no-gui --quiet crates/polyzonotope-reach/tests/cora/generate.m`. Under Octave this needs the shims in `tests/cora/octave` of both crates. CORA itself is GPL-3.0 and is not part of this repository.
+
 The nonlinear tests run every scenario with both methods: Van der Pol with an input, a pendulum with a torque input, a cubic drift that the linearization cannot see, Van der Pol from a single point, a spring whose stiffness is the input (`∂²f/∂x∂u ≠ 0`), and a damped cubic whose pieces split and later merge. Trajectories are integrated with a fine RK4 in `f64`. Every third holds the input at its upper end, every third at its lower end, and the rest jump every sub-step. They must stay inside the time-point set at every step end and inside the time-interval set at every sub-step. For linear dynamics, a step must give the same sets as `LinearReach`. Further tests check that an oversized set is refused, that a degree-9 field that overflows `f64` is refused instead of panicking, that missing third derivatives are refused at once, that the degree stays capped over 60 steps, that splitting carries a set that one piece cannot, that a failed run keeps its proven steps, that lifting keeps a wide set narrow, and that adaptive steps shrink where a fixed step fails and grow after easy steps. The Monte Carlo checks integrate each step over its own duration.
 
 In-crate mutation tests drop one error term at a time, each in a scenario built for it, and show a trajectory escaping: the quadratic error and the Hessian spread for linearization, and the static set, its cubic form, the cross term, `δᵀ H δ`, the change of the cubic term, the remainder and the input part of `δ` for polynomialization. The spreads of `J(z*)` and `H(z*)` come from rounding only, and no sampling can show them.
@@ -148,7 +150,7 @@ In-crate mutation tests drop one error term at a time, each in a scenario built 
 ## Roadmap
 
 1. A tighter dynamic error for wide sets. From `ρ = 1`, Van der Pol fails because the error box feeds on itself.
-2. A cross-check of the reachable sets against CORA, for linear and nonlinear systems.
+2. A cross-check of the nonlinear reachable sets against CORA. Its generator needs MATLAB, because CORA's symbolic derivatives do not run under Octave.
 
 ## License
 
