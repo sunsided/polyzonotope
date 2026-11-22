@@ -25,5 +25,10 @@ summary: Keep task ci, ci.yml and hooks in sync; pinned, least-privilege workflo
 - CI jobs in `ci.yml`: `branch`, `fmt`, `clippy`, `style` (separators, README links, typos,
   mermaid), `doc`, `test` (ubuntu, macOS, Windows), `coverage`, `deny`, `msrv`, `semver` (PRs only). `actions-lint.yml`
   runs `actionlint` and `zizmor`. `coverage` is CI-only: it exists for the Codecov upload.
+- `dependencies` in `ci.yml` (dependency submission) runs only on pushes to `main`: it builds
+  an SPDX SBOM with `cargo-sbom` and submits it to the dependency graph. It is CI-only and not a
+  required check.
+- `zizmor-sarif` in `actions-lint.yml` (zizmor (code scanning)) runs only on pushes to `main` and
+  uploads findings as SARIF to the Security tab without failing. The blocking `zizmor` job stays.
 - New jobs that should gate merges must also be added to branch protection. Mention that in
   the PR.
