@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.2](https://github.com/sunsided/polyzonotope/compare/polyzonotope-reach-v0.1.1...polyzonotope-reach-v0.1.2) - 2026-11-22
+
+### Changed
+
+- Describe the scope and audience of both crates in their READMEs
+
 ## [0.1.1](https://github.com/sunsided/polyzonotope/compare/polyzonotope-reach-v0.1.0...polyzonotope-reach-v0.1.1) - 2026-11-21
 
 ### Changed
