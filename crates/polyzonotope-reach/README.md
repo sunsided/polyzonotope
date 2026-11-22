@@ -12,6 +12,8 @@ Reachable-set over-approximation for dynamical systems, with the sparse polynomi
 
 Given a set of start states and a set of inputs, the crate computes flowpipes: for each time step, one set that holds every state at the end of the step and one that holds every state during it. `LinearReach` handles `x' = A x + B u` with a Taylor-series matrix exponential and an enclosed remainder; `NonlinearReach` handles `x' = f(x, u)` by conservative linearization or conservative polynomialization, with set splitting, merging and adaptive steps. A step it cannot prove is refused rather than returned, and with the `sound` feature the floating-point rounding is enclosed as well. The crate is `no_std` with `alloc`.
 
+Part of the [planning and search crates](https://sunsided.github.io/planning-and-search/); see also this crate's [overview page](https://sunsided.github.io/planning-and-search/crates/polyzonotope-reach/).
+
 ## Who this is for
 
 - Control and verification engineers who need to show that a vehicle, drone, pendulum or oscillator stays within bounds for every initial state and every input signal in a given range, not only for a handful of simulated runs.
