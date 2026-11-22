@@ -7,6 +7,7 @@ edition = "2024"
 license = "MIT OR Apache-2.0"
 rust-version = "1.89"
 repository = "https://github.com/sunsided/polyzonotope"
+homepage = "https://sunsided.github.io/planning-and-search/crates/polyzonotope-reach/"
 readme = "README.md"
 keywords = ["reachability", "zonotope", "verification", "flowpipe", "nonlinear"]
 categories = ["mathematics", "science", "no-std"]
