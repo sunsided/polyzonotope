@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.2](https://github.com/sunsided/polyzonotope/compare/v0.4.1...v0.4.2) - 2026-11-22
+
+### Changed
+
+- Open the README with what the crate computes
+- Link the crate to its page on the planning and search site
+- Point the SBOM submission at the generated file
+- Report dependencies and workflow findings to GitHub code security
+
 ## [0.4.1](https://github.com/sunsided/polyzonotope/compare/v0.4.0...v0.4.1) - 2026-11-22
 
 ### Changed

@@ -2,7 +2,7 @@
 name = "polyzonotope-reach"
 description = "Validated reachable-set over-approximation of linear and nonlinear dynamics with sparse polynomial zonotopes"
 # The first release; later versions come from release-plz (0.0.0 only claimed the name).
-version = "0.1.2"
+version = "0.1.3"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 rust-version = "1.89"
